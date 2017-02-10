@@ -1,7 +1,7 @@
 # Google Datalab for Machine Learning Education
 
 
-### Setting Up {#setup}
+### Setting Up
 
 Here is how to setup your own Datalab VM running on Google Cloud:
 
@@ -43,7 +43,7 @@ Here is how to setup your own Datalab VM running on Google Cloud:
   You can start writing and executing code.
 
 
-### Troubleshooting {#troubleshooting}
+### Troubleshooting
 
 * Google Compute Engine and Cloud ML APIs should already be enabled for your
   project. If not enabled, you can enable them by going to these two links:
@@ -54,7 +54,7 @@ Here is how to setup your own Datalab VM running on Google Cloud:
 
   Click the "Enable" button and wait until operation completes.
 
-  ![Enable API](img/enable_api.png){height="29px"}
+  ![Enable API](img/enable_api.png)
 
 
 * If you receive a message that the Cloud ML service accounts are unable to
