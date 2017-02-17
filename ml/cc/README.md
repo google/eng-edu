@@ -6,7 +6,7 @@
 Here is how to setup your own Datalab VM running on Google Cloud:
 
 1. Select existing or create new Google Cloud Project using your favorite
-  browser.
+  browser. You must be in the OWNER role to continue.
 
 2. Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
   console window. Click on "Start cloud shell" in the dialog box that opens the
