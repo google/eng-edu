@@ -14,13 +14,17 @@ Here is how to setup your own Datalab VM running on Google Cloud:
 
   ![Start Cloud Shell](img/cloud_shell.png)
 
-3. Create a new Datalab VM. From the Cloud Shell console, run the following
+3. Install the Datalab tool. From the Cloud Shell console, run the following command:
+    
+        gcloud components install datalab
+
+4. Create a new Datalab VM. From the Cloud Shell console, run the following
   commands:
 
         git clone https://github.com/google/eng-edu.git
         ./eng-edu/ml/cc/bin/datalab_create.sh
 
-4. Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
+5. Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
   run the following command:
 
         ./eng-edu/ml/cc/bin/datalab_connect.sh
@@ -28,7 +32,7 @@ Here is how to setup your own Datalab VM running on Google Cloud:
   If you are asked to setup an SSH key or a passphrase, press enter to stick
   with the defaults.
 
-5. Wait for the Cloud Shell console message that Datalab is ready for use.
+6. Wait for the Cloud Shell console message that Datalab is ready for use.
 
   Click on the "Web preview" button of the Cloud Shell window menu (the up
   arrow icon at the top-left), then under "Change port" select port 8081 to
@@ -39,7 +43,7 @@ Here is how to setup your own Datalab VM running on Google Cloud:
   New browser tab with the Datalab application should open. Click "Accept" to
   accept the terms of service and proceed.
 
-6. Click on the Notebook button to open a new notebook. Setup is now complete.
+7. Click on the Notebook button to open a new notebook. Setup is now complete.
   You can start writing and executing code.
 
 
