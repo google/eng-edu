@@ -18,7 +18,7 @@ assert_datalab_vm_does_not_exist
 
 ensure_components
 
-echo "Provisioning and launching a new Datalab VM"
+echo "Provisioning a new Datalab VM"
 datalab create "${MLCC_INSTANCE}" --zone="${MLCC_ZONE}" --no-connect
 
 echo "Success!"
