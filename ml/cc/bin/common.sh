@@ -7,7 +7,8 @@
 set -e
 
 MLCC_ZONE=us-central1-a
-MLCC_INSTANCE=mlccvm-${USER//_/}
+MLCC_USER_NAME=$(echo "${USER}" | sed 's/[^a-zA-Z0-9]//g')
+MLCC_INSTANCE=mlccvm-${MLCC_USER_NAME}
 
 function ensure_components() {
   echo "Installing required Datalab components and tools into the gcloud shell"
