@@ -36,7 +36,6 @@ echo "Updating/installing gcloud components"
 sudo gcloud components update
 sudo gcloud components install alpha
 
-ORIG_PROJECT=$(gcloud config get-value project)
 EMAILS=$@
 
 for EMAIL in "${STUDENT_EMAILS[@]}"; do
@@ -46,10 +45,6 @@ for EMAIL in "${STUDENT_EMAILS[@]}"; do
 
   echo "Deleting project $PROJECT_ID for $EMAIL ... "
   gcloud alpha projects delete $PROJECT_ID --quiet
-
-  # set current project back to the original value
-  gcloud config set project $ORIG_PROJECT
 done
 
 echo "Success!"
-
