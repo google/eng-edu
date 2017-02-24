@@ -1,12 +1,18 @@
 #!/bin/bash
 #
-# A script to create multiple Datalab VM projects.
+# A script to create multiple Datalab VM projects in bulk.
 #
 # author: psimakov@google.com (Pavel Simakov)
 
+# TODO(psimakov): factor out ZONE as a flag
+
+# TODO(psimakov): add public instructions for using this script by TAs/students
+
 set -e
 
+VM_ZONE=us-central1-a
 PROJECT_HOME_URL="https://console.cloud.google.com/home/dashboard?project"
+LIST_FN="account-list-$(date +%s).csv"
 LABELS=""
 
 if [ "$#" -lt 6 ]; then
@@ -71,19 +77,16 @@ fi
 
 TOTAL_STUDENT_EMAILS=${#STUDENT_EMAILS[@]}
 TOTAL_OWNER_EMAILS=${#OWNER_EMAILS[@]}
-ORIG_PROJECT=$(gcloud config get-value project)
-LIST_FN="account-list-$(date +%s).csv"
-PROGRESS=1
 
-echo "Updating/installing gcloud components"
-sudo gcloud components update
-sudo gcloud components install alpha
-
-truncate -s 0 $LIST_FN
+echo "Updating/installing required gcloud components"
+sudo gcloud --quiet components update
+sudo gcloud --quiet components install alpha datalab
 
 echo "Creating $TOTAL_STUDENT_EMAILS projects; recording progress to $LIST_FN"
+truncate -s 0 $LIST_FN
+
+PROGRESS=1
 for STUDENT_EMAIL in "${STUDENT_EMAILS[@]}"; do
-  # set current project to the student's project
   PROJECT_ID=$(echo "${PROJECT_PREFIX}--${STUDENT_EMAIL}" \
       | sed 's/@/x/g' | sed 's/\./x/g' | cut -c 1-30)
 
@@ -94,15 +97,15 @@ for STUDENT_EMAIL in "${STUDENT_EMAILS[@]}"; do
   # wait for project to fully materialize
   sleep 2
 
-  echo "Adding student as editor"
-  gcloud projects add-iam-policy-binding $PROJECT_ID \
-      --member user:$STUDENT_EMAIL --role roles/editor
-
   echo "Adding Facilitators/TAs as owners"
   for OWNER_EMAIL in "${OWNER_EMAILS[@]}"; do
     gcloud projects add-iam-policy-binding $PROJECT_ID \
         --member user:$OWNER_EMAIL --role roles/owner
   done
+
+  echo "Adding student as editor"
+  gcloud projects add-iam-policy-binding $PROJECT_ID \
+      --member user:$STUDENT_EMAIL --role roles/editor
 
   echo "Enabling Billing"
   gcloud alpha billing accounts projects link $PROJECT_ID \
@@ -112,24 +115,27 @@ for STUDENT_EMAIL in "${STUDENT_EMAILS[@]}"; do
   gcloud service-management enable compute_component --project=$PROJECT_ID
   gcloud service-management enable ml.googleapis.com --project=$PROJECT_ID
 
-  echo "Adding ML service account"
-  gcloud beta ml init-project --project=$PROJECT_ID --quiet
+  # compute expected student Linux user name from the student email address by
+  # dropping anything after '@' and permitting only [a-zA-Z0-9]
+  STUDENT_USER_NAME=$(echo "$STUDENT_EMAIL" \
+      | sed 's/@.*//g' | sed 's/[^a-zA-Z0-9]//g' )
 
-  echo "Adding new firewall rule to access Datalab VM"
-  gcloud config set project $PROJECT_ID
-  gcloud compute firewall-rules create allow-datalab \
-      --quiet --allow=tcp:22,tcp:8081
+  # compute a VM name based on student Linux user name
+  VM_INSTANCE="mlccvm-${STUDENT_USER_NAME}"
 
-  # set current project back to the original value
-  gcloud config set project $ORIG_PROJECT
+  echo "Provisioning a new Datalab VM instance ${VM_INSTANCE}"
+  datalab create "${VM_INSTANCE}" \
+      --for-user $STUDENT_EMAIL --project=$PROJECT_ID --zone="${VM_ZONE}" \
+      --no-connect
 
   # output the email, project id, and a link to the project console
-  printf "%s, %s, %s=%s\n" \
-      $STUDENT_EMAIL $PROJECT_ID $PROJECT_HOME_URL $PROJECT_ID | tee -a $LIST_FN
+  printf "%s, %s, %s, %s=%s\n" \
+      $STUDENT_EMAIL $STUDENT_USER_NAME $PROJECT_ID $PROJECT_HOME_URL \
+      $PROJECT_ID | tee -a $LIST_FN
+
   (( PROGRESS++ ))
 done
 
 sort -k1 -n -t, $LIST_FN
 
 echo "Success!"
-
