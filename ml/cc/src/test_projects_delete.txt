@@ -1,0 +1,4 @@
+'sudo', 'gcloud', '--quiet', 'components', 'update'
+'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha', 'datalab'
+'gcloud', '--quiet', 'alpha', 'projects', 'delete', 'my-prefix--student1examplecom'
+'gcloud', '--quiet', 'alpha', 'projects', 'delete', 'my-prefix--student2examplecom'
