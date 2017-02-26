@@ -320,7 +320,7 @@ class ProjectsCreate(Command):
     self.run(create_project)
 
     wait_2_s = Task('Waiting for project to fully materialize', [
-        'sleep', 2])
+        'sleep', '2'])
     self.run(wait_2_s)
 
     for owner_email in self.owner_emails:
@@ -500,6 +500,7 @@ class ArgsTests(unittest.TestCase):
           'project=my-prefix--student2examplecom',
           ''
       ], stream.read().split('\n'))
+    os.remove(out[:-1])
 
   def test_projects_create_with_labels(self):
     self.maxDiff = None
@@ -527,6 +528,7 @@ class ArgsTests(unittest.TestCase):
           'mlccvm-student2\thttps://console.cloud.google.com/home/dashboard?'
           'project=my-prefix--student2examplecom',
           ''], stream.read().split('\n'))
+    os.remove(out[:-1])
 
   def test_projects_delete(self):
     self.maxDiff = None
@@ -564,6 +566,7 @@ class ArgsTests(unittest.TestCase):
     assert out.startswith('account-list-'), out
     with open(out[:-1], 'r') as stream:
       self.assertEquals(expected + [''], stream.read().split('\n'))
+    os.remove(out[:-1])
 
 
 class RetryTests(unittest.TestCase):
