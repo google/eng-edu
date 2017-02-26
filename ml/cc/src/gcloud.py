@@ -24,8 +24,11 @@ import unittest
 MAX_STUDENTS = 40
 MAX_OWNERS = 10
 
-
-logging.basicConfig()
+logging.basicConfig(format=(
+    '%(asctime)s '
+    '| %(levelname)s '
+    '| %(processName)s '
+    '| %(message)s'), datefmt="%Y-%m-%d %H:%M:%S")
 LOG = logging.getLogger(__name__)
 LOG.level = logging.INFO
 
@@ -113,14 +116,6 @@ class Command(object):
   @classmethod
   def run(cls, task):
     """Executes a task."""
-    raise NotImplementedError()
-
-  def make_parser(self):
-    """Returns args parser for this command."""
-    raise NotImplementedError()
-
-  def execute(self):
-    """Executes the command."""
     raise NotImplementedError()
 
   @classmethod
@@ -213,11 +208,28 @@ class Command(object):
 
     LOG.info('Started %s', cmd_args.action)
     if cmd_args.serial:
-      LOG.info('Executing serially')
+      LOG.info('Disabling concurrent execution')
     else:
-      LOG.info('Executing concurrently')
-    cmd.execute(cmd_args)
+      LOG.info('Enabling concurrent execution')
+
+    assert not cmd.args
+    cmd.args = cmd_args
+    try:
+      cmd.execute()
+    finally:
+      cmd.args = None
     LOG.info('Completed %s', cmd_args.action)
+
+  def __init__(self):
+    self.args = None
+
+  def make_parser(self):
+    """Returns args parser for this command."""
+    raise NotImplementedError()
+
+  def execute(self):
+    """Executes the command."""
+    raise NotImplementedError()
 
 
 class ProjectsCreate(Command):
@@ -227,6 +239,7 @@ class ProjectsCreate(Command):
   CREATE_PROJECTS_RESULTS_FN = 'account-list-%s.csv' % int(time.time())
 
   def __init__(self):
+    super(ProjectsCreate, self).__init__()
     self.billing_id = None
     self.labels = None
     self.owner_emails = None
@@ -358,20 +371,20 @@ class ProjectsCreate(Command):
 
     return student_email, project_id, vm_name, self._project_home(project_id)
 
-  def execute(self, args):
+  def execute(self):
     """Creates projects in bulk."""
-    self._parse_args(args)
+    self._parse_args(self.args)
     self.run_common_tasks()
     LOG.info('Creating Datalab VM projects for %s students and %s owners',
              len(self.student_emails), len(self.owner_emails))
 
-    if args.serial:
+    if self.args.serial:
       rows = []
       for student_email in self.student_emails:
         row = self._create_project(student_email)
         rows.append(row)
     else:
-      pool = multiprocessing.Pool()
+      pool = multiprocessing.Pool(processes=16)
       rows = pool.map(self._create_project, self.student_emails)
 
     LOG.info('Writing results to %s', self.CREATE_PROJECTS_RESULTS_FN)
@@ -390,6 +403,7 @@ class ProjectsDelete(Command):
   NAME = 'projects_delete'
 
   def __init__(self):
+    super(ProjectsDelete, self).__init__()
     self.student_emails = None
     self.prefix = None
 
@@ -403,9 +417,9 @@ class ProjectsDelete(Command):
     self.student_emails = args.students.lower().split(' ')
     self.prefix = args.prefix
 
-  def execute(self, args):
+  def execute(self):
     """Deletes projects in bulk."""
-    self._parse_args(args)
+    self._parse_args(self.args)
     LOG.info('Deleting Datalab VM projects for %s students',
              len(self.student_emails))
     ProjectsCreate.run_common_tasks()
@@ -436,7 +450,7 @@ class CoreTests(unittest.TestCase):
 class ArgsTests(unittest.TestCase):
   """Tests."""
 
-  PREFIX = 'INFO:__main__:Dry run: ['
+  PREFIX = ' | Dry run: ['
 
   GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'gcloud.py')
   EXPECTED_PROJECTS_CREATE = os.path.join(
@@ -459,8 +473,10 @@ class ArgsTests(unittest.TestCase):
     """Extracts only the log lines that contain shell commands."""
     results = []
     for item in items:
-      if item.startswith(self.PREFIX) and item.endswith(']'):
-        results.append(item[len(self.PREFIX): -1])
+      index = item.find(self.PREFIX)
+      if index == -1:
+        continue
+      results.append(item[index + len(self.PREFIX): -1])
     results.append(u'')  # to match the new line at the end of the data file
     return results
 
