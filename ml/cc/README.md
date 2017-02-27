@@ -28,7 +28,7 @@ Here is how to set up your own Datalab VM running on Google Cloud:
   If you are asked to set up an SSH key or a passphrase, press enter to stick
   with the defaults.
 
-5. Wait for the Cloud Shell console message that Datalab is ready for use.
+5. Wait for the Cloud Shell console message that Datalab VM is ready for use.
 
   Click on the "Web preview" button of the Cloud Shell window menu (the up
   arrow icon at the top-left), then under "Change port" select port 8081 to
@@ -41,6 +41,13 @@ Here is how to set up your own Datalab VM running on Google Cloud:
 
 6. Click on the Notebook button to open a new notebook. Setup is now complete.
   You can start writing and executing code.
+
+7. You may choose to permanently delete your Datalab VM after use. There is
+  **no undo** for this operation. The Datalab VM, the interactive notebooks and
+  all data will be permanently deleted. If you wish to proceed, from the Cloud
+  Shell console, run the following command:
+
+        ./eng-edu/ml/cc/bin/datalab_delete.sh
 
 
 ### Setting Up For A Class Use: One Teacher, Multiple Students
@@ -65,12 +72,19 @@ your students:
 
         git clone https://github.com/google/eng-edu.git
 
-4. Look up the billing account ID you would like to use to cover the costs of
-  running student projects. You can find this information in the Billing
-  section of Google Cloud Platform web interface. The value is a series of
-  letters and numbers separated by dashes (i.e.`XXXXXX-XXXXXX-XXXXXX`).
+  To automate bulk operations with Google Cloud projects and Datalab VMs a
+  specialized command-line utility will be used. It can execute numerous
+  functions and has many options that control its behaviour. We guide you
+  below through the exact options to use. If you want to see all the options,
+  run the following command from the Cloud Shell console:
 
-5. Prepare:
+        python ./eng-edu/ml/cc/src/manage.py
+
+4. Prepare the following:
+  * the billing account ID you would like to use to cover the costs of
+  running student projects; you can find this information in the Billing
+  section of Google Cloud Platform web interface; the value is a series of
+  letters and numbers separated by dashes (i.e.`XXXXXX-XXXXXX-XXXXXX`)
   * a space-separated list of student's emails (i.e. `example.student1@gmail.com example.student2@gmail.com`); students will be given a role of EDITOR in their
   respetive projects
   * a space-separated list of owner emails,
@@ -81,11 +95,10 @@ your students:
   a portion of student email will be appended to it to create a unique project
   name (i.e. `project-name-prefix--examplestudent1`)
 
-
-  Using this information complete and run the following command from the Cloud
+5. Using information above, format and run the following command from the Cloud
   Shell console:
 
-        ./eng-edu/ml/cc/bin/projects_create.sh XXXXXX-XXXXXX-XXXXXX project-name-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "example.student1@gmail.com example.student2@gmail.com"
+        python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-name-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "example.student1@gmail.com example.student2@gmail.com"
 
 6. Review the content of the audit file `account-list-#######.csv`. It contains
   a list of all students along with a Datalab VM project URL for each project
@@ -100,7 +113,7 @@ your students:
   and data will be permanently deleted. If you wish to proceed, from the Cloud
   Shell console, run the following command:
 
-        ./eng-edu/ml/cc/bin/projects_delete.sh project-name-prefix --students "example.student1@gmail.com example.student2@gmail.com"
+        python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-name-prefix --students "example.student1@gmail.com example.student2@gmail.com"
 
 #### As A Student
 
@@ -140,31 +153,32 @@ your students:
 
 ### Troubleshooting
 
-* Google Compute Engine and Cloud ML APIs should already be enabled for your
-  project. If not enabled, you can enable them by going to these two links:
-    * [Compute Engine API]
-      (https://console.cloud.google.com/apis/api/compute_component/overview)
-    * [Cloud ML API]
-      (https://console.cloud.google.com/apis/api/ml.googleapis.com/overview)
+* **Symptom**: Waiting for Datalab VM to become accessible via "Web preview"
+  never completes. The Cloud Shell console hangs after these messages:
 
-  Click the "Enable" button and wait until operation completes.
+        Connecting to mlccvm-{xxxxxxx}
+        Ensuring that mlccvm-{xxxxxxx} can be connected to via SSH
 
-  ![Enable API](img/enable_api.png)
+  **Resolution**: The easiest resolution is to re-image your Datalab VM by
+  first deleting and then re-creating it. There is **no undo** for this
+  operation. The Datalab VM, the interactive notebooks and all data will be
+  permanently deleted. If you wish to proceed, from the Cloud Shell console,
+  run the following commands:
 
+        ./eng-edu/ml/cc/bin/datalab_delete.sh
+        ./eng-edu/ml/cc/bin/datalab_create.sh
 
-* If you receive a message that the Cloud ML service accounts are unable to
-  access resources in your Google Cloud project run the following command from
-  your Cloud Shell console:
-
-          gcloud beta ml init-project
-
-* Everything was working fine, but then the connection to Cloud Shell was lost.
-  To restart the Datalab VM, reopen the Cloud Shell window as described above.
-  From the Cloud Shell console, run the following command:
+  Make sure both commands complete with success. Now you are ready to connect
+  to a re-imaged Datalab VM. From the Cloud Shell console, run the following
+  command:
 
         ./eng-edu/ml/cc/bin/datalab_connect.sh
 
-* If you need to delete a Datalab VM after you're done using it, run the
-  following command from the Cloud Shell console:
+* **Symptom**: Everything was working fine, but then the connection to Cloud
+  Shell was lost because I either closed my browser window or Cloud Shell has
+  timed out.
 
-        ./eng-edu/ml/cc/bin/datalab_delete.sh
+  **Resolution**: To restart the Datalab VM, reopen the Cloud Shell window as
+  described above. From the Cloud Shell console, run the following command:
+
+        ./eng-edu/ml/cc/bin/datalab_connect.sh
