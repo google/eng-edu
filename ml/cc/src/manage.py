@@ -452,7 +452,7 @@ class ArgsTests(unittest.TestCase):
 
   PREFIX = ' | Dry run: ['
 
-  GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'gcloud.py')
+  GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'manage.py')
   EXPECTED_PROJECTS_CREATE = os.path.join(
       os.path.dirname(__file__), 'test_projects_create.txt')
   EXPECTED_PROJECTS_CREATE_LABELS = os.path.join(
