@@ -10,6 +10,7 @@ __author__ = 'Pavel Simakov (psimakov@google.com)'
 
 import argparse
 import copy_reg
+import json
 import logging
 import multiprocessing
 import os
@@ -88,15 +89,19 @@ class Command(object):
   COMMANDS = {}
   TESTS = []
 
-  @classmethod
-  def dry_run_cmd(cls, task):
+  def dry_run_cmd(self, task):
     """Runs a task as fake shell command, returns no result."""
     if task.caption:
       LOG.info(task.caption)
     LOG.info('Dry run: %s', task.args)
+    if self.args.mock_gcloud_data:
+      mock_responses = json.loads(self.args.mock_gcloud_data)
+    else:
+      mock_responses = {}
+    key = ' '.join(task.args)
+    return mock_responses.get(key, None)
 
-  @classmethod
-  def real_run_cmd(cls, task):
+  def real_run_cmd(self, task):
     """Runs a task as a real shell command, checks result and returns output."""
     if task.caption:
       LOG.info(task.caption)
@@ -142,6 +147,8 @@ class Command(object):
     parser.add_argument(
         '--dry_run', help='Whether to do a dry run. No real gcloud commands '
         'will be issued.', action='store_true')
+    parser.add_argument(
+        '--mock_gcloud_data', help='For system use during testing.')
     parser.add_argument(
         '--serial', help='Whether to disable concurrent task execution.',
         action='store_true')
@@ -203,14 +210,14 @@ class Command(object):
       finally:
         LOG = original_log
 
-    Command.run = (
-        Command.dry_run_cmd if cmd_args.dry_run else Command.real_run_cmd)
-
     LOG.info('Started %s', cmd_args.action)
     if cmd_args.serial:
       LOG.info('Disabling concurrent execution')
     else:
       LOG.info('Enabling concurrent execution')
+
+    cmd.run = (
+        cmd.dry_run_cmd if cmd_args.dry_run else cmd.real_run_cmd)
 
     assert not cmd.args
     cmd.args = cmd_args
@@ -337,74 +344,94 @@ class ProjectsCreate(Command):
     return 'mlccvm-%s' % vm_id
 
   @classmethod
-  def run_common_tasks(cls):
+  def run_common_tasks(cls, cmd):
     update_comp = Task('Updating components', [
         'sudo', 'gcloud', '--quiet', 'components', 'update'])
-    cls.run(update_comp)
+    cmd.run(update_comp)
     install_comp = Task('Installing components: alpha, datalab', [
         'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha',
         'datalab'])
-    cls.run(install_comp)
+    cmd.run(install_comp)
 
   def _create_project(self, student_email):
     """Creates one student project."""
     project_id = self.project_id(self.prefix, student_email)
     vm_name = self.vm_name(student_email)
 
-    create_project = Task('Creating project %s for student %s' % (
-        project_id, student_email), [
-            'gcloud', 'alpha', 'projects', 'create', project_id])
-    if self.labels:
-      create_project.append(['--labels', self.labels])
-    self.run(create_project)
+    check_project = Task(None, [
+        'gcloud', 'projects', 'list', '--filter', project_id,
+        '--format', 'value(PROJECT_ID)'
+    ])
+    existing_project = bool(self.run(check_project))
 
-    wait_2_s = Task('Waiting for project to fully materialize', [
-        'sleep', '2'])
-    self.run(wait_2_s)
+    if existing_project:
+      LOG.warning('Reusing existing project %s for student %s',
+                  project_id, student_email)
+    else:
+      create_project = Task('Creating new project %s for student %s' % (
+          project_id, student_email), [
+              'gcloud', 'alpha', 'projects', 'create', project_id])
+      if self.labels:
+        create_project.append(['--labels', self.labels])
+      self.run(create_project)
 
-    for owner_email in self.owner_emails:
-      add_owner_role = Task('Adding %s as owner' % owner_email, [
+      wait_2_s = Task('Waiting for project to fully materialize', [
+          'sleep', '2'])
+      self.run(wait_2_s)
+
+      for owner_email in self.owner_emails:
+        add_owner_role = Task('Adding %s as owner' % owner_email, [
+            'gcloud', 'projects', 'add-iam-policy-binding', project_id,
+            '--member', 'user:%s' % owner_email, '--role', 'roles/owner'])
+        self.run(add_owner_role)
+
+      add_student_role = Task('Adding %s as student' % student_email, [
           'gcloud', 'projects', 'add-iam-policy-binding', project_id,
-          '--member', 'user:%s' % owner_email, '--role', 'roles/owner'])
-      self.run(add_owner_role)
+          '--member', 'user:%s' % student_email, '--role', 'roles/editor'])
+      self.run(add_student_role)
 
-    add_student_role = Task('Adding %s as student' % student_email, [
-        'gcloud', 'projects', 'add-iam-policy-binding', project_id,
-        '--member', 'user:%s' % student_email, '--role', 'roles/editor'])
-    self.run(add_student_role)
+      enable_billing = Task('Enabling Billing', [
+          'gcloud', 'alpha', 'billing', 'accounts', 'projects', 'link',
+          project_id, '--account-id', self.billing_id])
+      self.run(enable_billing)
 
-    enable_billing = Task('Enabling Billing', [
-        'gcloud', 'alpha', 'billing', 'accounts', 'projects', 'link',
-        project_id, '--account-id', self.billing_id])
-    self.run(enable_billing)
+      enable_compute = Task('Enabling Compute API', [
+          'gcloud', 'service-management', 'enable', 'compute_component',
+          '--project', project_id])
+      enable_compute.max_try_count = 3
+      self.run(enable_compute)
 
-    enable_compute = Task('Enabling Compute API', [
-        'gcloud', 'service-management', 'enable', 'compute_component',
-        '--project', project_id])
-    enable_compute.max_try_count = 3
-    self.run(enable_compute)
+      enable_ml = Task('Enabling ML API', [
+          'gcloud', 'service-management', 'enable', 'ml.googleapis.com',
+          '--project', project_id])
+      enable_ml.max_try_count = 3
+      self.run(enable_ml)
 
-    enable_ml = Task('Enabling ML API', [
-        'gcloud', 'service-management', 'enable', 'ml.googleapis.com',
-        '--project', project_id])
-    enable_ml.max_try_count = 3
-    self.run(enable_ml)
+    check_vm = Task(None, [
+        'gcloud', 'compute', 'list', '--project', project_id,
+        '--filter', vm_name, '--format', 'value(NAME)'
+    ])
+    existing_vm = bool(self.run(check_vm))
 
-    provision_datalab = Task('Provisioning datalab', [
+    if existing_vm:
+      delete_vm = Task('Deleting existing Datalab VM', [
+          'gcloud', '--quiet', 'compute', 'instances', 'delete',
+          vm_name, '--zone', self.zone, '--delete-disks', 'all'])
+      self.run(delete_vm)
+    create_vm = Task('Provisioning new Datalab VM', [
         'datalab', 'create', vm_name, '--for-user', student_email,
         '--project', project_id, '--zone', self.zone, '--no-connect'])
 
     if self.image_name:
-      provision_datalab.append(['--image-name', self.image_name])
-
-    self.run(provision_datalab)
+      create_vm.append(['--image-name', self.image_name])
+    self.run(create_vm)
 
     return student_email, project_id, vm_name, self._project_home(project_id)
 
   def execute(self):
     """Creates projects in bulk."""
     self._parse_args(self.args)
-    self.run_common_tasks()
+    self.run_common_tasks(self)
     LOG.info('Creating Datalab VM projects for %s students and %s owners',
              len(self.student_emails), len(self.owner_emails))
 
@@ -452,12 +479,22 @@ class ProjectsDelete(Command):
     self._parse_args(self.args)
     LOG.info('Deleting Datalab VM projects for %s students',
              len(self.student_emails))
-    ProjectsCreate.run_common_tasks()
+    ProjectsCreate.run_common_tasks(self)
     for student_email in self.student_emails:
       project_id = ProjectsCreate.project_id(self.prefix, student_email)
-      delete_project = Task('Deleting project %s' % project_id, [
-          'gcloud', '--quiet', 'alpha', 'projects', 'delete', project_id])
-      self.run(delete_project)
+
+      check_project = Task(None, [
+          'gcloud', 'projects', 'list', '--filter', project_id,
+          '--format', 'value(PROJECT_ID)'
+      ])
+      existing_project = bool(self.run(check_project))
+
+      if not existing_project:
+        LOG.warning('Project not found; unable to delete: %s', project_id)
+      else:
+        delete_project = Task('Deleting project %s' % project_id, [
+            'gcloud', '--quiet', 'alpha', 'projects', 'delete', project_id])
+        self.run(delete_project)
 
 
 class CoreTests(unittest.TestCase):
@@ -485,6 +522,10 @@ class ArgsTests(unittest.TestCase):
   GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'manage.py')
   EXPECTED_PROJECTS_CREATE = os.path.join(
       os.path.dirname(__file__), 'test_projects_create.txt')
+  EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS = os.path.join(
+      os.path.dirname(__file__), 'test_projects_create_project_exists.txt')
+  EXPECTED_PROJECTS_CREATE_VM_EXISTS = os.path.join(
+      os.path.dirname(__file__), 'test_projects_create_vm_exists.txt')
   EXPECTED_PROJECTS_CREATE_LABELS = os.path.join(
       os.path.dirname(__file__), 'test_projects_create_labels.txt')
   EXPECTED_PROJECTS_CREATE_IMAGE = os.path.join(
@@ -552,6 +593,57 @@ class ArgsTests(unittest.TestCase):
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE)
     self._assert_account_list(out)
 
+  def test_projects_create_project_exists(self):
+    self.maxDiff = None
+
+    mock_shell_responses = {
+        'gcloud projects list --filter my-prefix--student1examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
+        'gcloud projects list --filter my-prefix--student2examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom',
+    }
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY,
+        'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--mock_gcloud_data', json.dumps(mock_shell_responses),
+        '--billing_id', '12345',
+        '--prefix', 'my-prefix',
+        '--owners', 'owner1@example.com owner2@example.com',
+        '--students', 'student1@example.com student2@example.com'])
+
+    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS)
+    self._assert_account_list(out)
+
+  def test_projects_create_vm_exists(self):
+    self.maxDiff = None
+
+    mock_shell_responses = {
+        'gcloud projects list --filter my-prefix--student1examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
+
+        'gcloud compute list --project my-prefix--student1examplecom '
+        '--filter mlccvm-student1 --format value(NAME)': 'mlccvm-student1',
+
+        'gcloud projects list --filter my-prefix--student2examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom',
+
+        'gcloud compute list --project my-prefix--student2examplecom '
+        '--filter mlccvm-student2 --format value(NAME)': 'mlccvm-student2'
+    }
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY,
+        'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--mock_gcloud_data', json.dumps(mock_shell_responses),
+        '--billing_id', '12345',
+        '--prefix', 'my-prefix',
+        '--owners', 'owner1@example.com owner2@example.com',
+        '--students', 'student1@example.com student2@example.com'])
+
+    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_VM_EXISTS)
+    self._assert_account_list(out)
+
   def test_projects_create_with_labels(self):
     self.maxDiff = None
 
@@ -599,11 +691,21 @@ class ArgsTests(unittest.TestCase):
   def test_projects_delete(self):
     self.maxDiff = None
 
+    mock_shell_responses = {
+        'gcloud projects list --filter my-prefix--student1examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
+        'gcloud projects list --filter my-prefix--student2examplecom '
+        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom'
+    }
+
     out, err = self._run([
         'python', self.GCLOUD_PY,
-        'projects_delete', '--no_tests', '--dry_run',
+        'projects_delete',
+        '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(mock_shell_responses),
         '--prefix', 'my-prefix',
         '--students', 'student1@example.com student2@example.com'])
+
     self.assertFalse(out)
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE)
 

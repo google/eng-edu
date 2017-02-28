@@ -1,0 +1,8 @@
+'sudo', 'gcloud', '--quiet', 'components', 'update'
+'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha', 'datalab'
+'gcloud', 'projects', 'list', '--filter', 'my-prefix--student1examplecom', '--format', 'value(PROJECT_ID)'
+'gcloud', 'compute', 'list', '--project', 'my-prefix--student1examplecom', '--filter', 'mlccvm-student1', '--format', 'value(NAME)'
+'datalab', 'create', 'mlccvm-student1', '--for-user', 'student1@example.com', '--project', 'my-prefix--student1examplecom', '--zone', 'us-central1-a', '--no-connect'
+'gcloud', 'projects', 'list', '--filter', 'my-prefix--student2examplecom', '--format', 'value(PROJECT_ID)'
+'gcloud', 'compute', 'list', '--project', 'my-prefix--student2examplecom', '--filter', 'mlccvm-student2', '--format', 'value(NAME)'
+'datalab', 'create', 'mlccvm-student2', '--for-user', 'student2@example.com', '--project', 'my-prefix--student2examplecom', '--zone', 'us-central1-a', '--no-connect'
