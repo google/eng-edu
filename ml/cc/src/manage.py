@@ -416,7 +416,8 @@ class ProjectsCreate(Command):
     if existing_vm:
       delete_vm = Task('Deleting existing Datalab VM', [
           'gcloud', '--quiet', 'compute', 'instances', 'delete',
-          vm_name, '--zone', self.zone, '--delete-disks', 'all'])
+          vm_name, '--project', project_id,
+          '--zone', self.zone, '--delete-disks', 'all'])
       self.run(delete_vm)
     create_vm = Task('Provisioning new Datalab VM', [
         'datalab', 'create', vm_name, '--for-user', student_email,
