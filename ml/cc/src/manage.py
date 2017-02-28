@@ -28,7 +28,7 @@ logging.basicConfig(format=(
     '%(asctime)s '
     '| %(levelname)s '
     '| %(processName)s '
-    '| %(message)s'), datefmt="%Y-%m-%d %H:%M:%S")
+    '| %(message)s'), datefmt='%Y-%m-%d %H:%M:%S')
 LOG = logging.getLogger(__name__)
 LOG.level = logging.INFO
 
@@ -238,9 +238,15 @@ class ProjectsCreate(Command):
   NAME = 'projects_create'
   CREATE_PROJECTS_RESULTS_FN = 'account-list-%s.csv' % int(time.time())
 
+  SUPPORTED_DATALAB_IMAGES = {
+      'TF_RC0': ('TensorFlow 0.11, RC0',
+                 'gcr.io/cloud-datalab/datalab:local-20170127')
+  }
+
   def __init__(self):
     super(ProjectsCreate, self).__init__()
     self.billing_id = None
+    self.image_name = None
     self.labels = None
     self.owner_emails = None
     self.student_emails = None
@@ -259,6 +265,12 @@ class ProjectsCreate(Command):
         required=True
     )
 
+  def _images_names(self):
+    items = []
+    for image_key, image_def in self.SUPPORTED_DATALAB_IMAGES.iteritems():
+      items.append('"%s" (%s)' % (image_key, image_def[0]))
+    return ', '.join(items)
+
   def make_parser(self):
     """Creates default argument parser."""
     parser = self.default_parser(self)
@@ -269,6 +281,10 @@ class ProjectsCreate(Command):
         'information in the Billing section of Google Cloud Platform web '
         'interface. The value is a series of letters and numbers separated '
         'by dashes (i.e. XXXXXX-XXXXXX-XXXXXX).', required=True)
+    parser.add_argument(
+        '--image_name', help='A name of the specific VM image to pass into '
+        '"datalab create". Default image will be used if no value is provided. '
+        'Supported images are: %s.' % self._images_names())
     parser.add_argument(
         '--labels', help='A comma-separated list of project labels '
         '(i.e. "foo=bar,alice=bob").')
@@ -283,6 +299,16 @@ class ProjectsCreate(Command):
 
   def _parse_args(self, args):
     self.billing_id = args.billing_id
+
+    image_key = args.image_name
+    if image_key:
+      assert image_key in self.SUPPORTED_DATALAB_IMAGES, (
+          'Unsupported image name "%s". '
+          'Supported images are: %s.' % (image_key, self._images_names()))
+      self.image_name = self.SUPPORTED_DATALAB_IMAGES[image_key][1]
+    else:
+      self.image_name = None
+
     self.labels = args.labels
     self.owner_emails = args.owners.lower().split(' ')
     self.student_emails = args.students.lower().split(' ')
@@ -367,6 +393,10 @@ class ProjectsCreate(Command):
     provision_datalab = Task('Provisioning datalab', [
         'datalab', 'create', vm_name, '--for-user', student_email,
         '--project', project_id, '--zone', self.zone, '--no-connect'])
+
+    if self.image_name:
+      provision_datalab.append(['--image-name', self.image_name])
+
     self.run(provision_datalab)
 
     return student_email, project_id, vm_name, self._project_home(project_id)
@@ -457,6 +487,8 @@ class ArgsTests(unittest.TestCase):
       os.path.dirname(__file__), 'test_projects_create.txt')
   EXPECTED_PROJECTS_CREATE_LABELS = os.path.join(
       os.path.dirname(__file__), 'test_projects_create_labels.txt')
+  EXPECTED_PROJECTS_CREATE_IMAGE = os.path.join(
+      os.path.dirname(__file__), 'test_projects_create_image.txt')
   EXPECTED_PROJECTS_DELETE = os.path.join(
       os.path.dirname(__file__), 'test_projects_delete.txt')
 
@@ -468,6 +500,24 @@ class ArgsTests(unittest.TestCase):
       self.assertEquals(
           to_unicode(expected.read()).split('\n'),
           self.filter_log(actual.split('\n')))
+
+  def _assert_account_list(self, out):
+    self.assertTrue(out)
+    assert out.startswith('account-list-'), out
+
+    with open(out[:-1], 'r') as stream:
+      self.assertEquals([
+          'student_email\tproject_id\tvm_name\tproject_url',
+          'student1@example.com\tmy-prefix--student1examplecom\t'
+          'mlccvm-student1\t'
+          'https://console.cloud.google.com/home/dashboard?'
+          'project=my-prefix--student1examplecom',
+          'student2@example.com\tmy-prefix--student2examplecom\t'
+          'mlccvm-student2\thttps://console.cloud.google.com/home/dashboard?'
+          'project=my-prefix--student2examplecom',
+          ''
+      ], stream.read().split('\n'))
+    os.remove(out[:-1])
 
   def filter_log(self, items):
     """Extracts only the log lines that contain shell commands."""
@@ -500,23 +550,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE)
-
-    self.assertTrue(out)
-    assert out.startswith('account-list-'), out
-
-    with open(out[:-1], 'r') as stream:
-      self.assertEquals([
-          'student_email\tproject_id\tvm_name\tproject_url',
-          'student1@example.com\tmy-prefix--student1examplecom\t'
-          'mlccvm-student1\t'
-          'https://console.cloud.google.com/home/dashboard?'
-          'project=my-prefix--student1examplecom',
-          'student2@example.com\tmy-prefix--student2examplecom\t'
-          'mlccvm-student2\thttps://console.cloud.google.com/home/dashboard?'
-          'project=my-prefix--student2examplecom',
-          ''
-      ], stream.read().split('\n'))
-    os.remove(out[:-1])
+    self._assert_account_list(out)
 
   def test_projects_create_with_labels(self):
     self.maxDiff = None
@@ -531,20 +565,36 @@ class ArgsTests(unittest.TestCase):
         '--labels', 'foo=bar,alice=john'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_LABELS)
+    self._assert_account_list(out)
 
-    self.assertTrue(out)
-    assert out.startswith('account-list-'), out
-    with open(out[:-1], 'r') as stream:
-      self.assertEquals([
-          'student_email\tproject_id\tvm_name\tproject_url',
-          'student1@example.com\tmy-prefix--student1examplecom\t'
-          'mlccvm-student1\thttps://console.cloud.google.com/home/dashboard?'
-          'project=my-prefix--student1examplecom',
-          'student2@example.com\tmy-prefix--student2examplecom\t'
-          'mlccvm-student2\thttps://console.cloud.google.com/home/dashboard?'
-          'project=my-prefix--student2examplecom',
-          ''], stream.read().split('\n'))
-    os.remove(out[:-1])
+  def test_projects_create_bad_image(self):
+    self.maxDiff = None
+
+    with self.assertRaisesRegexp(Exception,
+                                 'Unsupported image name "bad_image_name".'):
+      self._run([
+          'python', self.GCLOUD_PY,
+          'projects_create', '--no_tests', '--dry_run', '--serial',
+          '--billing_id', '12345',
+          '--prefix', 'my-prefix',
+          '--owners', 'owner1@example.com owner2@example.com',
+          '--students', 'student1@example.com student2@example.com',
+          '--image_name', 'bad_image_name'])
+
+  def test_projects_create_with_image(self):
+    self.maxDiff = None
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY,
+        'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--billing_id', '12345',
+        '--prefix', 'my-prefix',
+        '--owners', 'owner1@example.com owner2@example.com',
+        '--students', 'student1@example.com student2@example.com',
+        '--image_name', 'TF_RC0'])
+
+    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_IMAGE)
+    self._assert_account_list(out)
 
   def test_projects_delete(self):
     self.maxDiff = None
