@@ -408,7 +408,7 @@ class ProjectsCreate(Command):
       self.run(enable_ml)
 
     check_vm = Task(None, [
-        'gcloud', 'compute', 'list', '--project', project_id,
+        'gcloud', 'compute', 'instances', 'list', '--project', project_id,
         '--filter', vm_name, '--format', 'value(NAME)'
     ])
     existing_vm = bool(self.run(check_vm))
@@ -622,13 +622,13 @@ class ArgsTests(unittest.TestCase):
         'gcloud projects list --filter my-prefix--student1examplecom '
         '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
 
-        'gcloud compute list --project my-prefix--student1examplecom '
+        'gcloud compute instances list --project my-prefix--student1examplecom '
         '--filter mlccvm-student1 --format value(NAME)': 'mlccvm-student1',
 
         'gcloud projects list --filter my-prefix--student2examplecom '
         '--format value(PROJECT_ID)': 'my-prefix--student2examplecom',
 
-        'gcloud compute list --project my-prefix--student2examplecom '
+        'gcloud compute instances list --project my-prefix--student2examplecom '
         '--filter mlccvm-student2 --format value(NAME)': 'mlccvm-student2'
     }
 
