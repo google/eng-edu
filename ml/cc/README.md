@@ -75,10 +75,13 @@ your students:
   To automate bulk operations with Google Cloud projects and Datalab VMs a
   specialized command-line utility will be used. It can execute numerous
   functions and has many options that control its behaviour. We guide you
-  below through the exact options to use. If you want to see all the options,
-  run the following command from the Cloud Shell console:
+  below through the exact options to use. If you want to see all supported
+  commands and their options, run one of the following command from the
+  Cloud Shell console:
 
-        python ./eng-edu/ml/cc/src/manage.py
+        python ./eng-edu/ml/cc/src/manage.py -h
+        python ./eng-edu/ml/cc/src/manage.py projects_create -h
+        python ./eng-edu/ml/cc/src/manage.py projects_delete -h
 
 4. Prepare the following:
   * the billing account ID you would like to use to cover the costs of
