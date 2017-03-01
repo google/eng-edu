@@ -263,6 +263,19 @@ def active_project_exists(cmd, project_id):
     return False
 
 
+def project_exists_in_any_state(cmd, project_id):
+  check_project = Task(None, [
+      'gcloud', 'projects', 'describe', project_id,
+      '--format', 'value(lifecycleState)'
+  ])
+  check_project.expect_errors = True
+  try:
+    cmd.run(check_project)
+    return True
+  except:  # pylint: disable=bare-except
+    return False
+
+
 def check_vm_exists(cmd, project_id, zone, vm_name):
   check_vm = Task(None, [
       'gcloud', 'compute', 'instances', 'describe',
@@ -401,7 +414,7 @@ class ProjectsCreate(Command):
     vm_name = self.vm_name(student_email)
 
     can_provision_vm = True
-    if not active_project_exists(self, project_id):
+    if not project_exists_in_any_state(self, project_id):
       create_project = Task('Creating new project %s for student %s' % (
           project_id, student_email), [
               'gcloud', 'alpha', 'projects', 'create', project_id])
@@ -616,6 +629,22 @@ class ArgsTests(unittest.TestCase):
       '--zone us-central1-a mlccvm-student2': (0, None),
   }
 
+  MOCK_RESP_SOME_DELETED_PROJECTS = {
+      'gcloud projects describe my-prefix--student1examplecom '
+      '--format value(lifecycleState)': (0, 'SOME NON ACTOVE STATE'),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student1examplecom '
+      '--zone us-central1-a mlccvm-student1': (1, None),
+
+      'gcloud projects describe my-prefix--student2examplecom '
+      '--format value(lifecycleState)': (1, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student2examplecom '
+      '--zone us-central1-a mlccvm-student2': (1, None),
+  }
+
   def _run(self, args):
     return Command().real_run_cmd(Task(None, args))
 
@@ -781,7 +810,7 @@ class ArgsTests(unittest.TestCase):
 
     out, err = self._run([
         'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
-        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_NO_PROJECTS_NO_VMS),
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_SOME_DELETED_PROJECTS),
         '--prefix', 'my-prefix',
         '--students', 'student1@example.com student2@example.com'])
 
