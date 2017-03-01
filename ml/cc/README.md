@@ -88,20 +88,20 @@ your students:
   running student projects; you can find this information in the Billing
   section of Google Cloud Platform web interface; the value is a series of
   letters and numbers separated by dashes (i.e.`XXXXXX-XXXXXX-XXXXXX`)
-  * a space-separated list of student's emails (i.e. `example.student1@gmail.com example.student2@gmail.com`); students will be given a role of EDITOR in their
+  * a space-separated list of student's emails (i.e. `student1.example@gmail.com student2.example@gmail.com`); students will be given a role of EDITOR in their
   respetive projects
   * a space-separated list of owner emails,
   including your email as well as those of Teaching Assistants (i.e.
   `example.teacher@gmail.com example.ta@gmail.com`); owners will be given
   a role of OWNER in all student projects
-  * a unique prefix for student project names (i.e. `project-name-prefix`);
+  * a unique prefix for student project names (i.e. `project-prefix`);
   a portion of student email will be appended to it to create a unique project
-  name (i.e. `project-name-prefix--examplestudent1`)
+  name (i.e. `project-prefix--examplestudent1`)
 
 5. Using information above, format, and run the following command from the Cloud
   Shell console (note to remove a `--dry_run` flag):
 
-        python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-name-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "example.student1@gmail.com example.student2@gmail.com" --dry_run
+        python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "student1.example@gmail.com student2.example@gmail.com" --dry_run
 
 6. Review the content of the audit file `account-list-#######.csv`. It contains
   a list of all students along with a Datalab VM project URL for each project
@@ -116,7 +116,7 @@ your students:
   and data will be permanently deleted. If you wish to proceed, from the Cloud
   Shell console, run the following command (note to remove a `--dry_run` flag):
 
-        python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-name-prefix --students "example.student1@gmail.com example.student2@gmail.com" --dry_run
+        python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-prefix --students "student1.example@gmail.com student2.example@gmail.com" --dry_run
 
 #### As A Student
 
