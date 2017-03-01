@@ -250,11 +250,14 @@ class Command(object):
 
 def check_project_exists(cmd, project_id):
   check_project = Task(None, [
-      'gcloud', 'projects', 'describe', project_id
+      'gcloud', 'projects', 'describe', project_id,
+      '--format', 'value(lifecycleState)'
   ])
   check_project.expect_errors = True
   try:
-    cmd.run(check_project)
+    out, _ = cmd.run(check_project)
+    if out == 'DELETE_REQUESTED':
+      return False
     return True
   except:  # pylint: disable=bare-except
     return False
@@ -334,6 +337,11 @@ class ProjectsCreate(Command):
         'your email as well as those of Teaching Assistants . Owners will be '
         'given a role of OWNER in all student projects.', required=True)
     parser.add_argument(
+        '--reprovision', help='Whether to reprovision Datalab VMs in existing '
+        'projects. If set, existing Datalab VMs will be deleted and new '
+        'Datalab VMs will be provisioned: there is NO UNDO. If not set, '
+        'existing projects will not be altered.', action='store_true')
+    parser.add_argument(
         '--zone', help='A name of the Google Cloud Platform zone to host '
         'your resources.', default='us-central1-a')
     return parser
@@ -392,10 +400,8 @@ class ProjectsCreate(Command):
     project_id = self.project_id(self.prefix, student_email)
     vm_name = self.vm_name(student_email)
 
-    if check_project_exists(self, project_id):
-      LOG.warning('Reusing existing project %s for student %s',
-                  project_id, student_email)
-    else:
+    can_provision_vm = True
+    if not check_project_exists(self, project_id):
       create_project = Task('Creating new project %s for student %s' % (
           project_id, student_email), [
               'gcloud', 'alpha', 'projects', 'create', project_id])
@@ -434,20 +440,28 @@ class ProjectsCreate(Command):
           '--project', project_id])
       enable_ml.max_try_count = 3
       self.run(enable_ml)
+    else:
+      if self.args.reprovision:
+        LOG.warning('Re-provisioning Datalab VM for project %s for student %s',
+                    project_id, student_email)
+      else:
+        LOG.warning('Skipping work on project %s for student %s',
+                    project_id, student_email)
+        can_provision_vm = False
 
-    if check_vm_exists(self, project_id, self.zone, vm_name):
-      delete_vm = Task('Deleting existing Datalab VM', [
-          'gcloud', '--quiet', 'compute', 'instances', 'delete',
-          vm_name, '--project', project_id,
-          '--zone', self.zone, '--delete-disks', 'all'])
-      self.run(delete_vm)
-    create_vm = Task('Provisioning new Datalab VM', [
-        'datalab', 'create', vm_name, '--for-user', student_email,
-        '--project', project_id, '--zone', self.zone, '--no-connect'])
-
-    if self.image_name:
-      create_vm.append(['--image-name', self.image_name])
-    self.run(create_vm)
+    if can_provision_vm:
+      if check_vm_exists(self, project_id, self.zone, vm_name):
+        delete_vm = Task('Deleting existing Datalab VM', [
+            'gcloud', '--quiet', 'compute', 'instances', 'delete',
+            vm_name, '--project', project_id,
+            '--zone', self.zone, '--delete-disks', 'all'])
+        self.run(delete_vm)
+      create_vm = Task('Provisioning new Datalab VM', [
+          'datalab', 'create', vm_name, '--for-user', student_email,
+          '--project', project_id, '--zone', self.zone, '--no-connect'])
+      if self.image_name:
+        create_vm.append(['--image-name', self.image_name])
+      self.run(create_vm)
 
     return student_email, project_id, vm_name, self._project_home(project_id)
 
@@ -540,6 +554,9 @@ class ArgsTests(unittest.TestCase):
       os.path.dirname(__file__), 'test_projects_create.txt')
   EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS = os.path.join(
       os.path.dirname(__file__), 'test_projects_create_project_exists.txt')
+  EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS_NOREP = os.path.join(
+      os.path.dirname(__file__),
+      'test_projects_create_project_exists_norepr.txt')
   EXPECTED_PROJECTS_CREATE_VM_EXISTS = os.path.join(
       os.path.dirname(__file__), 'test_projects_create_vm_exists.txt')
   EXPECTED_PROJECTS_CREATE_LABELS = os.path.join(
@@ -552,13 +569,15 @@ class ArgsTests(unittest.TestCase):
       os.path.dirname(__file__), 'test_projects_delete_missing.txt')
 
   MOCK_RESP_NO_PROJECTS_NO_VMS = {
-      'gcloud projects describe my-prefix--student1examplecom': (1, None),
+      'gcloud projects describe my-prefix--student1examplecom '
+      '--format value(lifecycleState)': (1, None),
 
       'gcloud compute instances describe '
       '--project my-prefix--student1examplecom '
       '--zone us-central1-a mlccvm-student1': (1, None),
 
-      'gcloud projects describe my-prefix--student2examplecom': (1, None),
+      'gcloud projects describe my-prefix--student2examplecom '
+      '--format value(lifecycleState)': (1, None),
 
       'gcloud compute instances describe '
       '--project my-prefix--student2examplecom '
@@ -566,31 +585,13 @@ class ArgsTests(unittest.TestCase):
   }
 
   MOCK_RESP_YES_PROJECTS_NO_VMS = {
-      'gcloud projects describe my-prefix--student1examplecom': (0, None),
-
       'gcloud compute instances describe '
       '--project my-prefix--student1examplecom '
       '--zone us-central1-a mlccvm-student1': (1, None),
 
-      'gcloud projects describe my-prefix--student2examplecom': (0, None),
-
       'gcloud compute instances describe '
       '--project my-prefix--student2examplecom '
       '--zone us-central1-a mlccvm-student2': (1, None),
-  }
-
-  MOCK_RESP_YES_PROJECTS_YES_VMS = {
-      'gcloud projects describe my-prefix--student1examplecom': (0, None),
-
-      'gcloud compute instances describe '
-      '--project my-prefix--student1examplecom '
-      '--zone us-central1-a mlccvm-student1': (0, None),
-
-      'gcloud projects describe my-prefix--student2examplecom': (0, None),
-
-      'gcloud compute instances describe '
-      '--project my-prefix--student2examplecom '
-      '--zone us-central1-a mlccvm-student2': (0, None),
   }
 
   def _run(self, args):
@@ -662,9 +663,25 @@ class ArgsTests(unittest.TestCase):
         '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_NO_VMS),
         '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
-        '--students', 'student1@example.com student2@example.com'])
+        '--students', 'student1@example.com student2@example.com',
+        '--reprovision'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS)
+    self._assert_account_list(out)
+
+  def test_projects_create_project_exists_no_reprovision(self):
+    self.maxDiff = None
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY,
+        'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_NO_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
+        '--owners', 'owner1@example.com owner2@example.com',
+        '--students', 'student1@example.com student2@example.com'])
+
+    self._assert_file_equals(
+        err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS_NOREP)
     self._assert_account_list(out)
 
   def test_projects_create_vm_exists(self):
@@ -673,10 +690,10 @@ class ArgsTests(unittest.TestCase):
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
         '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
-        '--students', 'student1@example.com student2@example.com'])
+        '--students', 'student1@example.com student2@example.com',
+        '--reprovision'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_VM_EXISTS)
     self._assert_account_list(out)
@@ -729,7 +746,6 @@ class ArgsTests(unittest.TestCase):
 
     out, err = self._run([
         'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
-        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
         '--prefix', 'my-prefix',
         '--students', 'student1@example.com student2@example.com'])
 
