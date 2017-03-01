@@ -8,7 +8,7 @@
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
 
-# TODO(psimakov): check project_ids don't collide due to truncation
+# TODO(psimakov): do need to wait VM deletion before we reprovision?
 
 import argparse
 import copy_reg
@@ -455,7 +455,7 @@ class ProjectsCreate(Command):
       self.run(enable_ml)
     else:
       if self.args.reprovision:
-        LOG.warning('Re-provisioning Datalab VM for project %s for student %s',
+        LOG.warning('Found existing project %s for student %s',
                     project_id, student_email)
       else:
         LOG.warning('Skipping work on project %s for student %s',
@@ -484,6 +484,17 @@ class ProjectsCreate(Command):
     self.run_common_tasks(self)
     LOG.info('Creating Datalab VM projects for %s students and %s owners',
              len(self.student_emails), len(self.owner_emails))
+
+    projects_ids = {}
+    for student_email in self.student_emails:
+      project_id = self.project_id(self.prefix, student_email)
+      if project_id in projects_ids:
+        existing_email = projects_ids[project_id]
+        if existing_email == student_email:
+          raise Exception('Dupicate email %s.', student_email)
+        raise Exception('Emails %s and %s lead to a duplicate project_id %s.',
+                        student_email, existing_email, project_id)
+      projects_ids[project_id] = student_email
 
     if self.args.serial:
       rows = []
