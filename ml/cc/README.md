@@ -98,10 +98,10 @@ your students:
   a portion of student email will be appended to it to create a unique project
   name (i.e. `project-name-prefix--examplestudent1`)
 
-5. Using information above, format and run the following command from the Cloud
-  Shell console:
+5. Using information above, format, and run the following command from the Cloud
+  Shell console (note to remove a `--dry_run` flag):
 
-        python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-name-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "example.student1@gmail.com example.student2@gmail.com"
+        python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-name-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "example.student1@gmail.com example.student2@gmail.com" --dry_run
 
 6. Review the content of the audit file `account-list-#######.csv`. It contains
   a list of all students along with a Datalab VM project URL for each project
@@ -114,9 +114,9 @@ your students:
 8. You may choose to permanently delete all projects after the class ends.
   There is **no undo** for this operation. All student projects, Datalab VMs
   and data will be permanently deleted. If you wish to proceed, from the Cloud
-  Shell console, run the following command:
+  Shell console, run the following command (note to remove a `--dry_run` flag):
 
-        python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-name-prefix --students "example.student1@gmail.com example.student2@gmail.com"
+        python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-name-prefix --students "example.student1@gmail.com example.student2@gmail.com" --dry_run
 
 #### As A Student
 
