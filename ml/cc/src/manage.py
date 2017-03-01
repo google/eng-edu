@@ -8,6 +8,8 @@
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
 
+# TODO(psimakov): check project_ids don't collide due to truncation
+
 import argparse
 import copy_reg
 import json
@@ -248,7 +250,7 @@ class Command(object):
     raise NotImplementedError()
 
 
-def check_project_exists(cmd, project_id):
+def active_project_exists(cmd, project_id):
   check_project = Task(None, [
       'gcloud', 'projects', 'describe', project_id,
       '--format', 'value(lifecycleState)'
@@ -256,9 +258,7 @@ def check_project_exists(cmd, project_id):
   check_project.expect_errors = True
   try:
     out, _ = cmd.run(check_project)
-    if out == 'DELETE_REQUESTED':
-      return False
-    return True
+    return out and out.strip() == 'ACTIVE'
   except:  # pylint: disable=bare-except
     return False
 
@@ -401,7 +401,7 @@ class ProjectsCreate(Command):
     vm_name = self.vm_name(student_email)
 
     can_provision_vm = True
-    if not check_project_exists(self, project_id):
+    if not active_project_exists(self, project_id):
       create_project = Task('Creating new project %s for student %s' % (
           project_id, student_email), [
               'gcloud', 'alpha', 'projects', 'create', project_id])
@@ -519,7 +519,7 @@ class ProjectsDelete(Command):
     ProjectsCreate.run_common_tasks(self)
     for student_email in self.student_emails:
       project_id = ProjectsCreate.project_id(self.prefix, student_email)
-      if not check_project_exists(self, project_id):
+      if not active_project_exists(self, project_id):
         LOG.warning('Project not found; unable to delete: %s', project_id)
       else:
         delete_project = Task('Deleting project %s' % project_id, [
@@ -585,13 +585,35 @@ class ArgsTests(unittest.TestCase):
   }
 
   MOCK_RESP_YES_PROJECTS_NO_VMS = {
+      'gcloud projects describe my-prefix--student1examplecom '
+      '--format value(lifecycleState)': (0, 'ACTIVE\n'),
+
       'gcloud compute instances describe '
       '--project my-prefix--student1examplecom '
       '--zone us-central1-a mlccvm-student1': (1, None),
 
+      'gcloud projects describe my-prefix--student2examplecom '
+      '--format value(lifecycleState)': (0, 'ACTIVE'),
+
       'gcloud compute instances describe '
       '--project my-prefix--student2examplecom '
       '--zone us-central1-a mlccvm-student2': (1, None),
+  }
+
+  MOCK_RESP_YES_PROJECTS_YES_VMS = {
+      'gcloud projects describe my-prefix--student1examplecom '
+      '--format value(lifecycleState)': (0, 'ACTIVE\n'),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student1examplecom '
+      '--zone us-central1-a mlccvm-student1': (0, None),
+
+      'gcloud projects describe my-prefix--student2examplecom '
+      '--format value(lifecycleState)': (0, 'ACTIVE'),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student2examplecom '
+      '--zone us-central1-a mlccvm-student2': (0, None),
   }
 
   def _run(self, args):
@@ -690,6 +712,7 @@ class ArgsTests(unittest.TestCase):
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
         '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com',
@@ -746,6 +769,7 @@ class ArgsTests(unittest.TestCase):
 
     out, err = self._run([
         'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
         '--prefix', 'my-prefix',
         '--students', 'student1@example.com student2@example.com'])
 
