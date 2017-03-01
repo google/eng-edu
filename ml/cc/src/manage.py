@@ -58,6 +58,7 @@ class Task(object):
   """An atomic task."""
 
   def __init__(self, caption, args):
+    self.expect_errors = False
     self.max_try_count = 0
 
     self.caption = caption
@@ -73,7 +74,8 @@ class Task(object):
           stdout=subprocess.PIPE,
           stderr=subprocess.PIPE)
     except Exception as e:  # pylint: disable=broad-except
-      LOG.error('Command failed: %s; %s', self.args, e)
+      if not self.expect_errors:
+        LOG.error('Command failed: %s; %s', self.args, e)
       raise
     stdout, stderr = child.communicate()
     if child.returncode:
@@ -99,7 +101,13 @@ class Command(object):
     else:
       mock_responses = {}
     key = ' '.join(task.args)
-    return mock_responses.get(key, None)
+    mock_response = mock_responses.get(key, None)
+    if not mock_response:
+      return None, None
+    ret_code, ret_value = mock_response
+    if ret_code:
+      raise Exception('Error %s executing command: %s', ret_code, self.args)
+    return ret_value, None
 
   def real_run_cmd(self, task):
     """Runs a task as a real shell command, checks result and returns output."""
@@ -113,8 +121,9 @@ class Command(object):
       except Exception as e:  # pylint: disable=broad-except
         try_count += 1
         if task.max_try_count <= try_count:
-          LOG.warning('Command failed permanently after %s retries: %s; %s',
-                      try_count, task.args, e)
+          if not task.expect_errors:
+            LOG.warning('Command failed permanently after %s retries: %s; %s',
+                        try_count, task.args, e)
           raise
         LOG.warning('Retrying failed command: %s; %s', task.args, e)
 
@@ -239,6 +248,31 @@ class Command(object):
     raise NotImplementedError()
 
 
+def check_project_exists(cmd, project_id):
+  check_project = Task(None, [
+      'gcloud', 'projects', 'describe', project_id
+  ])
+  check_project.expect_errors = True
+  try:
+    cmd.run(check_project)
+    return True
+  except:  # pylint: disable=bare-except
+    return False
+
+
+def check_vm_exists(cmd, project_id, zone, vm_name):
+  check_vm = Task(None, [
+      'gcloud', 'compute', 'instances', 'describe',
+      '--project', project_id, '--zone', zone, vm_name
+  ])
+  check_vm.expect_errors = True
+  try:
+    cmd.run(check_vm)
+    return True
+  except:  # pylint: disable=bare-except
+    return False
+
+
 class ProjectsCreate(Command):
   """An action that creates projects in bulk."""
 
@@ -358,13 +392,7 @@ class ProjectsCreate(Command):
     project_id = self.project_id(self.prefix, student_email)
     vm_name = self.vm_name(student_email)
 
-    check_project = Task(None, [
-        'gcloud', 'projects', 'list', '--filter', project_id,
-        '--format', 'value(PROJECT_ID)'
-    ])
-    existing_project = bool(self.run(check_project))
-
-    if existing_project:
+    if check_project_exists(self, project_id):
       LOG.warning('Reusing existing project %s for student %s',
                   project_id, student_email)
     else:
@@ -407,13 +435,7 @@ class ProjectsCreate(Command):
       enable_ml.max_try_count = 3
       self.run(enable_ml)
 
-    check_vm = Task(None, [
-        'gcloud', 'compute', 'instances', 'list', '--project', project_id,
-        '--filter', vm_name, '--format', 'value(NAME)'
-    ])
-    existing_vm = bool(self.run(check_vm))
-
-    if existing_vm:
+    if check_vm_exists(self, project_id, self.zone, vm_name):
       delete_vm = Task('Deleting existing Datalab VM', [
           'gcloud', '--quiet', 'compute', 'instances', 'delete',
           vm_name, '--project', project_id,
@@ -483,14 +505,7 @@ class ProjectsDelete(Command):
     ProjectsCreate.run_common_tasks(self)
     for student_email in self.student_emails:
       project_id = ProjectsCreate.project_id(self.prefix, student_email)
-
-      check_project = Task(None, [
-          'gcloud', 'projects', 'list', '--filter', project_id,
-          '--format', 'value(PROJECT_ID)'
-      ])
-      existing_project = bool(self.run(check_project))
-
-      if not existing_project:
+      if not check_project_exists(self, project_id):
         LOG.warning('Project not found; unable to delete: %s', project_id)
       else:
         delete_project = Task('Deleting project %s' % project_id, [
@@ -533,6 +548,50 @@ class ArgsTests(unittest.TestCase):
       os.path.dirname(__file__), 'test_projects_create_image.txt')
   EXPECTED_PROJECTS_DELETE = os.path.join(
       os.path.dirname(__file__), 'test_projects_delete.txt')
+  EXPECTED_PROJECTS_DELETE_MISSING = os.path.join(
+      os.path.dirname(__file__), 'test_projects_delete_missing.txt')
+
+  MOCK_RESP_NO_PROJECTS_NO_VMS = {
+      'gcloud projects describe my-prefix--student1examplecom': (1, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student1examplecom '
+      '--zone us-central1-a mlccvm-student1': (1, None),
+
+      'gcloud projects describe my-prefix--student2examplecom': (1, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student2examplecom '
+      '--zone us-central1-a mlccvm-student2': (1, None),
+  }
+
+  MOCK_RESP_YES_PROJECTS_NO_VMS = {
+      'gcloud projects describe my-prefix--student1examplecom': (0, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student1examplecom '
+      '--zone us-central1-a mlccvm-student1': (1, None),
+
+      'gcloud projects describe my-prefix--student2examplecom': (0, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student2examplecom '
+      '--zone us-central1-a mlccvm-student2': (1, None),
+  }
+
+  MOCK_RESP_YES_PROJECTS_YES_VMS = {
+      'gcloud projects describe my-prefix--student1examplecom': (0, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student1examplecom '
+      '--zone us-central1-a mlccvm-student1': (0, None),
+
+      'gcloud projects describe my-prefix--student2examplecom': (0, None),
+
+      'gcloud compute instances describe '
+      '--project my-prefix--student2examplecom '
+      '--zone us-central1-a mlccvm-student2': (0, None),
+  }
 
   def _run(self, args):
     return Command().real_run_cmd(Task(None, args))
@@ -586,8 +645,8 @@ class ArgsTests(unittest.TestCase):
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--billing_id', '12345',
-        '--prefix', 'my-prefix',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_NO_PROJECTS_NO_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com'])
 
@@ -597,19 +656,11 @@ class ArgsTests(unittest.TestCase):
   def test_projects_create_project_exists(self):
     self.maxDiff = None
 
-    mock_shell_responses = {
-        'gcloud projects list --filter my-prefix--student1examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
-        'gcloud projects list --filter my-prefix--student2examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom',
-    }
-
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--mock_gcloud_data', json.dumps(mock_shell_responses),
-        '--billing_id', '12345',
-        '--prefix', 'my-prefix',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_NO_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com'])
 
@@ -619,26 +670,11 @@ class ArgsTests(unittest.TestCase):
   def test_projects_create_vm_exists(self):
     self.maxDiff = None
 
-    mock_shell_responses = {
-        'gcloud projects list --filter my-prefix--student1examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
-
-        'gcloud compute instances list --project my-prefix--student1examplecom '
-        '--filter mlccvm-student1 --format value(NAME)': 'mlccvm-student1',
-
-        'gcloud projects list --filter my-prefix--student2examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom',
-
-        'gcloud compute instances list --project my-prefix--student2examplecom '
-        '--filter mlccvm-student2 --format value(NAME)': 'mlccvm-student2'
-    }
-
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--mock_gcloud_data', json.dumps(mock_shell_responses),
-        '--billing_id', '12345',
-        '--prefix', 'my-prefix',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com'])
 
@@ -651,8 +687,8 @@ class ArgsTests(unittest.TestCase):
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--billing_id', '12345',
-        '--prefix', 'my-prefix',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_NO_PROJECTS_NO_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com',
         '--labels', 'foo=bar,alice=john'])
@@ -668,8 +704,7 @@ class ArgsTests(unittest.TestCase):
       self._run([
           'python', self.GCLOUD_PY,
           'projects_create', '--no_tests', '--dry_run', '--serial',
-          '--billing_id', '12345',
-          '--prefix', 'my-prefix',
+          '--billing_id', '12345', '--prefix', 'my-prefix',
           '--owners', 'owner1@example.com owner2@example.com',
           '--students', 'student1@example.com student2@example.com',
           '--image_name', 'bad_image_name'])
@@ -680,8 +715,8 @@ class ArgsTests(unittest.TestCase):
     out, err = self._run([
         'python', self.GCLOUD_PY,
         'projects_create', '--no_tests', '--dry_run', '--serial',
-        '--billing_id', '12345',
-        '--prefix', 'my-prefix',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_NO_PROJECTS_NO_VMS),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com',
         '--image_name', 'TF_RC0'])
@@ -692,23 +727,26 @@ class ArgsTests(unittest.TestCase):
   def test_projects_delete(self):
     self.maxDiff = None
 
-    mock_shell_responses = {
-        'gcloud projects list --filter my-prefix--student1examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student1examplecom',
-        'gcloud projects list --filter my-prefix--student2examplecom '
-        '--format value(PROJECT_ID)': 'my-prefix--student2examplecom'
-    }
-
     out, err = self._run([
-        'python', self.GCLOUD_PY,
-        'projects_delete',
-        '--no_tests', '--dry_run',
-        '--mock_gcloud_data', json.dumps(mock_shell_responses),
+        'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
         '--prefix', 'my-prefix',
         '--students', 'student1@example.com student2@example.com'])
 
     self.assertFalse(out)
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE)
+
+  def test_projects_delete_missing(self):
+    self.maxDiff = None
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_NO_PROJECTS_NO_VMS),
+        '--prefix', 'my-prefix',
+        '--students', 'student1@example.com student2@example.com'])
+
+    self.assertFalse(out)
+    self._assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE_MISSING)
 
   def test_projects_create_concurrent(self):
     self.maxDiff = None
