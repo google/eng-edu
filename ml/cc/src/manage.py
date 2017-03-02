@@ -422,9 +422,13 @@ class ProjectsCreate(Command):
         create_project.append(['--labels', self.labels])
       self.run(create_project)
 
-      wait_2_s = Task('Waiting for project to fully materialize', [
-          'sleep', '2'])
-      self.run(wait_2_s)
+      # wait while creation completes
+      while not self.args.dry_run:
+        if active_project_exists(self, project_id):
+          break
+        else:
+          wait_2_s = Task('Waiting for project creation', ['sleep', '2'])
+          self.run(wait_2_s)
 
       for owner_email in self.owner_emails:
         add_owner_role = Task('Adding %s as owner' % owner_email, [
@@ -469,6 +473,15 @@ class ProjectsCreate(Command):
             vm_name, '--project', project_id,
             '--zone', self.zone, '--delete-disks', 'all'])
         self.run(delete_vm)
+
+        # wait while deletion completes
+        while not self.args.dry_run:
+          if not check_vm_exists(self, project_id, self.zone, vm_name):
+            break
+          else:
+            wait_2_s = Task('Waiting for instance deletion', ['sleep', '2'])
+            self.run(wait_2_s)
+
       create_vm = Task('Provisioning new Datalab VM', [
           'datalab', 'create', vm_name, '--for-user', student_email,
           '--project', project_id, '--zone', self.zone, '--no-connect'])
