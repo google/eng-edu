@@ -7,6 +7,8 @@
 
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
+# TODO(psimakov): wait till Docker boots up before trying to copy bundle over
+
 import argparse
 import copy_reg
 import json
@@ -24,7 +26,7 @@ import unittest
 
 MAX_STUDENTS = 40
 MAX_OWNERS = 10
-POOL_CONCURRENCY = 20
+POOL_CONCURRENCY = 16
 DOCKER_IMAGE_PREFIX = 'gcr.io/cloud-datalab/datalab:'
 
 logging.basicConfig(format=(
@@ -545,7 +547,7 @@ class ProjectsCreate(Command):
     bundle_source = './mlcc-tmp/content_bundle/Downloads/mlcc/'
     bundle_target = '/content/datalab/notebooks/Downloads/'
 
-    LOG.info('Deployng content bundle to project %s', project_id)
+    LOG.info('Deploying content bundle to project %s', project_id)
     delete_remote = Task(None, [
         self.args.gcloud_bin, 'compute', 'ssh', vm_name,
         '--project', project_id, '--zone', self.zone, '--command',
@@ -577,18 +579,26 @@ class ProjectsCreate(Command):
           target = parts[0]
           break
     if not target:
-      LOG.warning('Failed to deploy content bundle to Docker %s', vm_name)
+      LOG.warning('Failed to find a target Docker container '
+                  'to deliver the bundle to: %s\n%s', vm_name, out)
     else:
       clean_container = Task(None, [
           self.args.gcloud_bin, 'compute', 'ssh', vm_name,
           '--project', project_id, '--zone', self.zone, '--command',
-          'docker exec %s rm -rf %smlcc' % (target, bundle_target)])
+          'docker exec %s rm -rf %smlcc/' % (target, bundle_target)])
       self.run(clean_container)
+
+      init_container = Task(None, [
+          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+          '--project', project_id, '--zone', self.zone, '--command',
+          'docker exec %s mkdir -p %smlcc/' % (target, bundle_target)])
+      self.run(init_container)
 
       copy_to_container = Task(None, [
           self.args.gcloud_bin, 'compute', 'ssh', vm_name,
           '--project', project_id, '--zone', self.zone, '--command',
-          'docker cp ~%smlcc/ %s:%s' % (bundle_target, target, bundle_target)])
+          'docker cp ~%smlcc/ %s:%smlcc/' % (
+              bundle_target, target, bundle_target)])
       self.run(copy_to_container)
 
   def _execute_one_non_raising(self, student_email):
@@ -608,11 +618,11 @@ class ProjectsCreate(Command):
       self.create_project(student_email, project_id)
     else:
       if self.args.provision_vm:
-        LOG.warning('Found existing project %s for student %s',
-                    project_id, student_email)
+        LOG.warning('Re-provisioning Datalab VM for existing '
+                    'project %s for student %s', project_id, student_email)
       else:
-        LOG.warning('Skipping work on project %s for student %s',
-                    project_id, student_email)
+        LOG.warning('Skipping re-provisioning of Datalab VM for existing '
+                    'project %s for student %s', project_id, student_email)
         need_to_provision_vm = False
 
     if need_to_provision_vm:
