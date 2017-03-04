@@ -61,9 +61,12 @@ your students:
   browser. You must be in the OWNER role to continue. All students would need
   a valid Google account to participate.
 
-2. Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
-  console window. Click on "Start cloud shell" in the dialog box that opens the
-  first time.
+2. To continue, you can use either Google Cloud Platform Cloud Shell or any
+  computer with an Internet connection and the most recent Google Cloud SDK
+  [installed] (https://cloud.google.com/sdk/downloads) (gcloud, gsutils).
+  To Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of
+  the console window. Click on "Start cloud shell" in the dialog box that
+  opens the first time.
 
   ![Start Cloud Shell](img/cloud_shell.png)
 
@@ -102,6 +105,16 @@ your students:
   Shell console (note to remove a `--dry_run` flag):
 
         python ./eng-edu/ml/cc/src/manage.py projects_create --billing_id XXXXXX-XXXXXX-XXXXXX --prefix project-prefix --owners "example.teacher@gmail.com example.ta@gmail.com" --students "student1.example@gmail.com student2.example@gmail.com" --dry_run
+
+  Note that `manage.py project_create` command has a number of command-line
+  flags that support a varierty of complex deployment scenarious.
+  The most notable flags are:
+  `--image_name`: to specify a specific version of a Datalab VM base image;
+  `--content_bundle`: to deploy a set of notebooks to each Datalab VM;
+  `--provision_vm`: to rebuild already provisioned Datalab VM;
+  `--zone`: to choose a Google Cloud Platform zone to host your resources.
+  Run `python ./eng-edu/ml/cc/src/manage.py projects_create --help` command
+  from the console to see a complete list.
 
 6. Review the content of the audit file `account-list-#######.csv`. It contains
   a list of all students along with a Datalab VM project URL for each project
