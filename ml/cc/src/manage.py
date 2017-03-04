@@ -546,7 +546,7 @@ class ProjectsCreate(Command):
     bundle_source = './mlcc-tmp/content_bundle/Downloads/mlcc/'
     bundle_target = '/content/datalab/notebooks/Downloads/'
 
-    LOG.info('Deploying content bundle to project %s', project_id)
+    LOG.info('Deploying content bundle')
     delete_remote = Task(None, [
         self.args.gcloud_bin, 'compute', 'ssh', vm_name,
         '--project', project_id, '--zone', self.zone, '--command',
@@ -581,10 +581,10 @@ class ProjectsCreate(Command):
       if target or self.args.dry_run:
         break
       else:
-        wait_5_s = Task(
+        wait_15_s = Task(
             'Waiting for Docker container %s...' % DOCKER_IMAGE_PREFIX,
-            ['sleep', '5'])
-        self.run(wait_5_s)
+            ['sleep', '15'])
+        self.run(wait_15_s)
 
     clean_container = Task(None, [
         self.args.gcloud_bin, 'compute', 'ssh', vm_name,
