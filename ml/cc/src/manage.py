@@ -25,7 +25,7 @@ import unittest
 MAX_STUDENTS = 40
 MAX_OWNERS = 10
 POOL_CONCURRENCY = 20
-DOCKER_IMAGE_PREFIX = 'gcr.io/cloud-datalab/datalab:local-'
+DOCKER_IMAGE_PREFIX = 'gcr.io/cloud-datalab/datalab:'
 
 logging.basicConfig(format=(
     '%(asctime)s '
