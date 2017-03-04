@@ -7,9 +7,6 @@
 
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
-
-# TODO(psimakov): do need to wait VM deletion before we reprovision?
-
 import argparse
 import copy_reg
 import json
@@ -20,12 +17,15 @@ import re
 import subprocess
 import sys
 import time
+import traceback
 import types
 import unittest
 
 
 MAX_STUDENTS = 40
 MAX_OWNERS = 10
+POOL_CONCURRENCY = 20
+DOCKER_IMAGE_PREFIX = 'gcr.io/cloud-datalab/datalab:local-'
 
 logging.basicConfig(format=(
     '%(asctime)s '
@@ -159,6 +159,9 @@ class Command(object):
         '--dry_run', help='Whether to do a dry run. No real gcloud commands '
         'will be issued.', action='store_true')
     parser.add_argument(
+        '--gcloud_bin', help='A specific location the the gcloud executable '
+        'to use for cloud access.', default='gcloud')
+    parser.add_argument(
         '--mock_gcloud_data', help='For system use during testing.')
     parser.add_argument(
         '--serial', help='Whether to disable concurrent task execution.',
@@ -250,9 +253,19 @@ class Command(object):
     raise NotImplementedError()
 
 
+def setup_gcloud_components(cmd):
+  update_comp = Task('Updating components', [
+      'sudo', cmd.args.gcloud_bin, '--quiet', 'components', 'update'])
+  cmd.run(update_comp)
+  install_comp = Task('Installing components: alpha, datalab', [
+      'sudo', cmd.args.gcloud_bin, '--quiet', 'components', 'install',
+      'alpha', 'datalab'])
+  cmd.run(install_comp)
+
+
 def active_project_exists(cmd, project_id):
   check_project = Task(None, [
-      'gcloud', 'projects', 'describe', project_id,
+      cmd.args.gcloud_bin, 'projects', 'describe', project_id,
       '--format', 'value(lifecycleState)'
   ])
   check_project.expect_errors = True
@@ -265,7 +278,7 @@ def active_project_exists(cmd, project_id):
 
 def project_exists_in_any_state(cmd, project_id):
   check_project = Task(None, [
-      'gcloud', 'projects', 'describe', project_id,
+      cmd.args.gcloud_bin, 'projects', 'describe', project_id,
       '--format', 'value(lifecycleState)'
   ])
   check_project.expect_errors = True
@@ -278,7 +291,7 @@ def project_exists_in_any_state(cmd, project_id):
 
 def check_vm_exists(cmd, project_id, zone, vm_name):
   check_vm = Task(None, [
-      'gcloud', 'compute', 'instances', 'describe',
+      cmd.args.gcloud_bin, 'compute', 'instances', 'describe',
       '--project', project_id, '--zone', zone, vm_name
   ])
   check_vm.expect_errors = True
@@ -287,6 +300,47 @@ def check_vm_exists(cmd, project_id, zone, vm_name):
     return True
   except:  # pylint: disable=bare-except
     return False
+
+
+class ContentBundleContext(object):
+  """Manages a local copy of content bundle."""
+
+  def __init__(self, cmd):
+    self.cmd = cmd
+    self.bundle = cmd.bundle
+
+  def __enter__(self):
+    if self.bundle:
+      remove_tmp = Task(None, [
+          'rm', '-rf', './mlcc-tmp/'])
+      self.cmd.run(remove_tmp)
+      create_tmp = Task(None, [
+          'mkdir', '-p', './mlcc-tmp/content_bundle/'])
+      self.cmd.run(create_tmp)
+
+      assert self.bundle.endswith('.tar.gz'), (
+          'The *.tar.gz file is expected: %s' % self.bundle)
+      if self.bundle.startswith('gs://'):
+        copy_to_local = Task('Loading remote content bundle %s' % self.bundle, [
+            'gsutil', 'cp', self.bundle, './mlcc-tmp/content_bundle.tar.gz'])
+      else:
+        assert os.path.isfile(self.bundle), (
+            'Content bundle not found: %s' % self.bundle)
+        copy_to_local = Task('Loading local content bundle %s' % self.bundle, [
+            'cp', self.bundle, './mlcc-tmp/content_bundle.tar.gz'])
+      self.cmd.run(copy_to_local)
+
+      untar = Task(None, [
+          'tar', '-zxvf', './mlcc-tmp/content_bundle.tar.gz', '-C',
+          './mlcc-tmp/content_bundle/'])
+      self.cmd.run(untar)
+      return None
+
+  def __exit__(self, *args):
+    if self.bundle:
+      remove_tmp = Task(None, [
+          'rm', '-rf', './mlcc-tmp/'])
+      self.cmd.run(remove_tmp)
 
 
 class ProjectsCreate(Command):
@@ -303,6 +357,7 @@ class ProjectsCreate(Command):
   def __init__(self):
     super(ProjectsCreate, self).__init__()
     self.billing_id = None
+    self.bundle = None
     self.image_name = None
     self.labels = None
     self.owner_emails = None
@@ -339,9 +394,12 @@ class ProjectsCreate(Command):
         'interface. The value is a series of letters and numbers separated '
         'by dashes (i.e. XXXXXX-XXXXXX-XXXXXX).', required=True)
     parser.add_argument(
-        '--image_name', help='A name of the specific VM image to pass into '
-        '"datalab create". Default image will be used if no value is provided. '
-        'Supported images are: %s.' % self._images_names())
+        '--content_bundle', help='An optional name of the tar.gz file with the '
+        'content bundle to deploy to each Datalab VM.')
+    parser.add_argument(
+        '--image_name', help='An optional name of the specific VM image to '
+        'pass into "datalab create". Default image will be used if no value '
+        'is provided. Supported images are: %s.' % self._images_names())
     parser.add_argument(
         '--labels', help='A comma-separated list of project labels '
         '(i.e. "foo=bar,alice=bob").')
@@ -350,10 +408,11 @@ class ProjectsCreate(Command):
         'your email as well as those of Teaching Assistants . Owners will be '
         'given a role of OWNER in all student projects.', required=True)
     parser.add_argument(
-        '--reprovision', help='Whether to reprovision Datalab VMs in existing '
-        'projects. If set, existing Datalab VMs will be deleted and new '
-        'Datalab VMs will be provisioned: there is NO UNDO. If not set, '
-        'existing projects will not be altered.', action='store_true')
+        '--provision_vm', help='Whether to re-provision Datalab VMs in the '
+        'existing projects. If set, existing Datalab VMs will be deleted and '
+        'new Datalab VMs will be provisioned: there is NO UNDO. If not set, '
+        'existing project VMs will not be altered, but fresh VMs will be '
+        'provisioned in the newly created projects.', action='store_true')
     parser.add_argument(
         '--zone', help='A name of the Google Cloud Platform zone to host '
         'your resources.', default='us-central1-a')
@@ -361,6 +420,7 @@ class ProjectsCreate(Command):
 
   def _parse_args(self, args):
     self.billing_id = args.billing_id
+    self.bundle = args.content_bundle
 
     image_key = args.image_name
     if image_key:
@@ -376,10 +436,12 @@ class ProjectsCreate(Command):
     self.student_emails = args.students.lower().split(' ')
     self.prefix = args.prefix
     self.zone = args.zone
+
     if len(self.owner_emails) > MAX_OWNERS:
       raise Exception('Too many owners: %s max.' % MAX_OWNERS)
     if len(self.student_emails) > MAX_STUDENTS:
       raise Exception('Too many students: %s max.' % MAX_STUDENTS)
+    self.assert_emails_and_project_ids_are_unique()
 
   @classmethod
   def project_id(cls, prefix, email):
@@ -398,106 +460,7 @@ class ProjectsCreate(Command):
     vm_id = re.sub(r'[^A-Za-z0-9]+', '', parts[0])
     return 'mlccvm-%s' % vm_id
 
-  @classmethod
-  def run_common_tasks(cls, cmd):
-    update_comp = Task('Updating components', [
-        'sudo', 'gcloud', '--quiet', 'components', 'update'])
-    cmd.run(update_comp)
-    install_comp = Task('Installing components: alpha, datalab', [
-        'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha',
-        'datalab'])
-    cmd.run(install_comp)
-
-  def _create_project(self, student_email):
-    """Creates one student project."""
-    project_id = self.project_id(self.prefix, student_email)
-    vm_name = self.vm_name(student_email)
-
-    can_provision_vm = True
-    if not project_exists_in_any_state(self, project_id):
-      create_project = Task('Creating new project %s for student %s' % (
-          project_id, student_email), [
-              'gcloud', 'alpha', 'projects', 'create', project_id])
-      if self.labels:
-        create_project.append(['--labels', self.labels])
-      self.run(create_project)
-
-      # wait while creation completes
-      while not self.args.dry_run:
-        if active_project_exists(self, project_id):
-          break
-        else:
-          wait_2_s = Task('Waiting for project creation', ['sleep', '2'])
-          self.run(wait_2_s)
-
-      for owner_email in self.owner_emails:
-        add_owner_role = Task('Adding %s as owner' % owner_email, [
-            'gcloud', 'projects', 'add-iam-policy-binding', project_id,
-            '--member', 'user:%s' % owner_email, '--role', 'roles/owner'])
-        self.run(add_owner_role)
-
-      add_student_role = Task('Adding %s as student' % student_email, [
-          'gcloud', 'projects', 'add-iam-policy-binding', project_id,
-          '--member', 'user:%s' % student_email, '--role', 'roles/editor'])
-      self.run(add_student_role)
-
-      enable_billing = Task('Enabling Billing', [
-          'gcloud', 'alpha', 'billing', 'accounts', 'projects', 'link',
-          project_id, '--account-id', self.billing_id])
-      self.run(enable_billing)
-
-      enable_compute = Task('Enabling Compute API', [
-          'gcloud', 'service-management', 'enable', 'compute_component',
-          '--project', project_id])
-      enable_compute.max_try_count = 3
-      self.run(enable_compute)
-
-      enable_ml = Task('Enabling ML API', [
-          'gcloud', 'service-management', 'enable', 'ml.googleapis.com',
-          '--project', project_id])
-      enable_ml.max_try_count = 3
-      self.run(enable_ml)
-    else:
-      if self.args.reprovision:
-        LOG.warning('Found existing project %s for student %s',
-                    project_id, student_email)
-      else:
-        LOG.warning('Skipping work on project %s for student %s',
-                    project_id, student_email)
-        can_provision_vm = False
-
-    if can_provision_vm:
-      if check_vm_exists(self, project_id, self.zone, vm_name):
-        delete_vm = Task('Deleting existing Datalab VM', [
-            'gcloud', '--quiet', 'compute', 'instances', 'delete',
-            vm_name, '--project', project_id,
-            '--zone', self.zone, '--delete-disks', 'all'])
-        self.run(delete_vm)
-
-        # wait while deletion completes
-        while not self.args.dry_run:
-          if not check_vm_exists(self, project_id, self.zone, vm_name):
-            break
-          else:
-            wait_2_s = Task('Waiting for instance deletion', ['sleep', '2'])
-            self.run(wait_2_s)
-
-      create_vm = Task('Provisioning new Datalab VM', [
-          'datalab', 'create', vm_name, '--for-user', student_email,
-          '--project', project_id, '--zone', self.zone, '--no-connect'])
-      if self.image_name:
-        create_vm.append(['--image-name', self.image_name])
-      self.run(create_vm)
-
-    return student_email, project_id, vm_name, self._project_home(project_id)
-
-  def execute(self):
-    """Creates projects in bulk."""
-    self._parse_args(self.args)
-    self.run_common_tasks(self)
-    LOG.info('Creating Datalab VM projects for %s students and %s owners',
-             len(self.student_emails), len(self.owner_emails))
-
+  def assert_emails_and_project_ids_are_unique(self):
     projects_ids = {}
     for student_email in self.student_emails:
       project_id = self.project_id(self.prefix, student_email)
@@ -509,14 +472,173 @@ class ProjectsCreate(Command):
                         student_email, existing_email, project_id)
       projects_ids[project_id] = student_email
 
-    if self.args.serial:
-      rows = []
-      for student_email in self.student_emails:
-        row = self._create_project(student_email)
-        rows.append(row)
+  def create_project(self, student_email, project_id):
+    create_project = Task('Creating new project %s for student %s' % (
+        project_id, student_email), [
+            self.args.gcloud_bin, 'alpha', 'projects', 'create', project_id])
+    if self.labels:
+      create_project.append(['--labels', self.labels])
+    self.run(create_project)
+
+    # wait while creation completes
+    while not self.args.dry_run:
+      if active_project_exists(self, project_id):
+        break
+      else:
+        wait_2_s = Task('Waiting for project creation', ['sleep', '2'])
+        self.run(wait_2_s)
+
+    for owner_email in self.owner_emails:
+      add_owner_role = Task('Adding %s as owner' % owner_email, [
+          self.args.gcloud_bin, 'projects', 'add-iam-policy-binding',
+          project_id, '--member', 'user:%s' % owner_email,
+          '--role', 'roles/owner'])
+      self.run(add_owner_role)
+
+    add_student_role = Task('Adding %s as student' % student_email, [
+        self.args.gcloud_bin, 'projects', 'add-iam-policy-binding', project_id,
+        '--member', 'user:%s' % student_email, '--role', 'roles/editor'])
+    self.run(add_student_role)
+
+    enable_billing = Task('Enabling Billing', [
+        self.args.gcloud_bin, 'alpha', 'billing', 'accounts', 'projects',
+        'link', project_id, '--account-id', self.billing_id])
+    self.run(enable_billing)
+
+    enable_compute = Task('Enabling Compute API', [
+        self.args.gcloud_bin, 'service-management', 'enable',
+        'compute_component', '--project', project_id])
+    enable_compute.max_try_count = 3
+    self.run(enable_compute)
+
+    enable_ml = Task('Enabling ML API', [
+        self.args.gcloud_bin, 'service-management', 'enable',
+        'ml.googleapis.com', '--project', project_id])
+    enable_ml.max_try_count = 3
+    self.run(enable_ml)
+
+  def provision_vm(self, student_email, project_id, vm_name):
+    if check_vm_exists(self, project_id, self.zone, vm_name):
+      delete_vm = Task('Deleting existing Datalab VM', [
+          self.args.gcloud_bin, '--quiet', 'compute', 'instances', 'delete',
+          vm_name, '--project', project_id,
+          '--zone', self.zone, '--delete-disks', 'all'])
+      self.run(delete_vm)
+
+      # wait while deletion completes
+      while not self.args.dry_run:
+        if not check_vm_exists(self, project_id, self.zone, vm_name):
+          break
+        else:
+          wait_2_s = Task('Waiting for instance deletion', ['sleep', '2'])
+          self.run(wait_2_s)
+
+    create_vm = Task('Provisioning new Datalab VM', [
+        'datalab', 'create', vm_name, '--for-user', student_email,
+        '--project', project_id, '--zone', self.zone, '--no-connect'])
+    if self.image_name:
+      create_vm.append(['--image-name', self.image_name])
+    self.run(create_vm)
+
+  def deploy_content_bundle(self, project_id, vm_name):
+    """Deploys content to the Datalab VM."""
+    bundle_source = './mlcc-tmp/content_bundle/Downloads/mlcc/'
+    bundle_target = '/content/datalab/notebooks/Downloads/'
+
+    LOG.info('Deployng content bundle to project %s', project_id)
+    delete_remote = Task(None, [
+        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', self.zone, '--command',
+        'rm -r ~%smlcc/ || true' % bundle_target])
+    self.run(delete_remote)
+    create_remote = Task(None, [
+        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', self.zone, '--command',
+        'mkdir -p ~%smlcc/' % bundle_target])
+    self.run(create_remote)
+    copy_to_remote = Task(None, [
+        self.args.gcloud_bin, 'compute', 'copy-files',
+        '--project', project_id, '--zone', self.zone,
+        bundle_source,
+        '%s:~%s' % (vm_name, bundle_target)])
+    self.run(copy_to_remote)
+
+    docker_ps = Task(None, [
+        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', self.zone, '--command',
+        'docker ps --format "{{.ID}}\t{{.Image}}"'])
+    out, _ = self.run(docker_ps)
+
+    target = None
+    if out:
+      for line in out.strip().split('\n')[1:]:
+        parts = line.split('\t')
+        if parts[1].startswith(DOCKER_IMAGE_PREFIX):
+          target = parts[0]
+          break
+    if not target:
+      LOG.warning('Failed to deploy content bundle to Docker %s', vm_name)
     else:
-      pool = multiprocessing.Pool(processes=16)
-      rows = pool.map(self._create_project, self.student_emails)
+      clean_container = Task(None, [
+          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+          '--project', project_id, '--zone', self.zone, '--command',
+          'docker exec %s rm -rf %smlcc' % (target, bundle_target)])
+      self.run(clean_container)
+
+      copy_to_container = Task(None, [
+          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+          '--project', project_id, '--zone', self.zone, '--command',
+          'docker cp ~%smlcc/ %s:%s' % (bundle_target, target, bundle_target)])
+      self.run(copy_to_container)
+
+  def _execute_one_non_raising(self, student_email):
+    try:
+      return self._execute_one_raising(student_email)
+    except:  # pylint: disable=bare-except
+      LOG.error(traceback.format_exc())
+      raise
+
+  def _execute_one_raising(self, student_email):
+    """Creates one student project."""
+    project_id = self.project_id(self.prefix, student_email)
+    vm_name = self.vm_name(student_email)
+
+    need_to_provision_vm = True
+    if not project_exists_in_any_state(self, project_id):
+      self.create_project(student_email, project_id)
+    else:
+      if self.args.provision_vm:
+        LOG.warning('Found existing project %s for student %s',
+                    project_id, student_email)
+      else:
+        LOG.warning('Skipping work on project %s for student %s',
+                    project_id, student_email)
+        need_to_provision_vm = False
+
+    if need_to_provision_vm:
+      self.provision_vm(student_email, project_id, vm_name)
+
+    if self.bundle:
+      self.deploy_content_bundle(project_id, vm_name)
+
+    return student_email, project_id, vm_name, self._project_home(project_id)
+
+  def execute(self):
+    """Creates projects in bulk."""
+    self._parse_args(self.args)
+    setup_gcloud_components(self)
+
+    with ContentBundleContext(self):
+      LOG.info('Creating Datalab VM projects for %s students and %s owners',
+               len(self.student_emails), len(self.owner_emails))
+      if self.args.serial:
+        rows = []
+        for student_email in self.student_emails:
+          row = self._execute_one_non_raising(student_email)
+          rows.append(row)
+      else:
+        pool = multiprocessing.Pool(processes=POOL_CONCURRENCY)
+        rows = pool.map(self._execute_one_non_raising, self.student_emails)
 
     LOG.info('Writing results to %s', self.CREATE_PROJECTS_RESULTS_FN)
     with open(self.CREATE_PROJECTS_RESULTS_FN, 'w') as output:
@@ -553,14 +675,15 @@ class ProjectsDelete(Command):
     self._parse_args(self.args)
     LOG.info('Deleting Datalab VM projects for %s students',
              len(self.student_emails))
-    ProjectsCreate.run_common_tasks(self)
+    setup_gcloud_components(self)
     for student_email in self.student_emails:
       project_id = ProjectsCreate.project_id(self.prefix, student_email)
       if not active_project_exists(self, project_id):
         LOG.warning('Project not found; unable to delete: %s', project_id)
       else:
         delete_project = Task('Deleting project %s' % project_id, [
-            'gcloud', '--quiet', 'alpha', 'projects', 'delete', project_id])
+            self.args.gcloud_bin, '--quiet', 'alpha', 'projects', 'delete',
+            project_id])
         self.run(delete_project)
 
 
@@ -604,6 +727,8 @@ class ArgsTests(unittest.TestCase):
       os.path.dirname(__file__), 'test_projects_delete.txt')
   EXPECTED_PROJECTS_DELETE_MISSING = os.path.join(
       os.path.dirname(__file__), 'test_projects_delete_missing.txt')
+  EXPECTED_PROJECTS_CONTENT_BUNDLE = os.path.join(
+      os.path.dirname(__file__), 'test_projects_create_content_bundle.txt')
 
   MOCK_RESP_NO_PROJECTS_NO_VMS = {
       'gcloud projects describe my-prefix--student1examplecom '
@@ -739,7 +864,7 @@ class ArgsTests(unittest.TestCase):
         '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com',
-        '--reprovision'])
+        '--provision_vm'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS)
     self._assert_account_list(out)
@@ -769,7 +894,7 @@ class ArgsTests(unittest.TestCase):
         '--billing_id', '12345', '--prefix', 'my-prefix',
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com',
-        '--reprovision'])
+        '--provision_vm'])
 
     self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_VM_EXISTS)
     self._assert_account_list(out)
@@ -867,6 +992,34 @@ class ArgsTests(unittest.TestCase):
     with open(out[:-1], 'r') as stream:
       self.assertEquals(expected + [''], stream.read().split('\n'))
     os.remove(out[:-1])
+
+  def test_content_bundle(self):
+    self.maxDiff = None
+
+    mock_response_data = {
+        'gcloud compute ssh mlccvm-student1 --project '
+        'my-prefix--student1examplecom --zone us-central1-a '
+        '--command docker ps --format "{{.ID}}\t{{.Image}}"': (
+            0, 'ID\tIMAGE\nfoo1\t%s-bar1' % DOCKER_IMAGE_PREFIX),
+
+        'gcloud compute ssh mlccvm-student2 --project '
+        'my-prefix--student2examplecom --zone us-central1-a '
+        '--command docker ps --format "{{.ID}}\t{{.Image}}"': (
+            0, 'ID\tIMAGE\nfoo2\t%s-bar2' % DOCKER_IMAGE_PREFIX),
+    }
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY,
+        'projects_create', '--no_tests', '--dry_run', '--serial',
+        '--mock_gcloud_data', json.dumps(mock_response_data),
+        '--billing_id', '12345', '--prefix', 'my-prefix',
+        '--owners', 'owner1@example.com owner2@example.com',
+        '--students', 'student1@example.com student2@example.com',
+        '--content_bundle', os.path.join(
+            os.path.dirname(__file__), 'test_content_bundle.tar.gz')])
+
+    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CONTENT_BUNDLE)
+    self._assert_account_list(out)
 
 
 class RetryTests(unittest.TestCase):
