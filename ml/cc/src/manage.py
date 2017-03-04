@@ -7,7 +7,6 @@
 
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
-# TODO(psimakov): wait till Docker boots up before trying to copy bundle over
 
 import argparse
 import copy_reg
@@ -565,41 +564,46 @@ class ProjectsCreate(Command):
         '%s:~%s' % (vm_name, bundle_target)])
     self.run(copy_to_remote)
 
-    docker_ps = Task(None, [
+    # wait while Docker starts up
+    target = None
+    while True:
+      docker_ps = Task(None, [
+          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+          '--project', project_id, '--zone', self.zone, '--command',
+          'docker ps --format "{{.ID}}\t{{.Image}}"'])
+      out, _ = self.run(docker_ps)
+      if out:
+        for line in out.strip().split('\n')[1:]:
+          parts = line.split('\t')
+          if parts[1].startswith(DOCKER_IMAGE_PREFIX):
+            target = parts[0]
+            break
+      if target or self.args.dry_run:
+        break
+      else:
+        wait_5_s = Task(
+            'Waiting for Docker container %s...' % DOCKER_IMAGE_PREFIX,
+            ['sleep', '5'])
+        self.run(wait_5_s)
+
+    clean_container = Task(None, [
         self.args.gcloud_bin, 'compute', 'ssh', vm_name,
         '--project', project_id, '--zone', self.zone, '--command',
-        'docker ps --format "{{.ID}}\t{{.Image}}"'])
-    out, _ = self.run(docker_ps)
+        'docker exec %s rm -rf %smlcc/' % (target, bundle_target)])
+    self.run(clean_container)
 
-    target = None
-    if out:
-      for line in out.strip().split('\n')[1:]:
-        parts = line.split('\t')
-        if parts[1].startswith(DOCKER_IMAGE_PREFIX):
-          target = parts[0]
-          break
-    if not target:
-      LOG.warning('Failed to find a target Docker container '
-                  'to deliver the bundle to: %s\n%s', vm_name, out)
-    else:
-      clean_container = Task(None, [
-          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-          '--project', project_id, '--zone', self.zone, '--command',
-          'docker exec %s rm -rf %smlcc/' % (target, bundle_target)])
-      self.run(clean_container)
+    init_container = Task(None, [
+        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', self.zone, '--command',
+        'docker exec %s mkdir -p %smlcc/' % (target, bundle_target)])
+    self.run(init_container)
 
-      init_container = Task(None, [
-          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-          '--project', project_id, '--zone', self.zone, '--command',
-          'docker exec %s mkdir -p %smlcc/' % (target, bundle_target)])
-      self.run(init_container)
-
-      copy_to_container = Task(None, [
-          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-          '--project', project_id, '--zone', self.zone, '--command',
-          'docker cp ~%smlcc/ %s:%smlcc/' % (
-              bundle_target, target, bundle_target)])
-      self.run(copy_to_container)
+    copy_to_container = Task(None, [
+        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', self.zone, '--command',
+        'docker cp ~%smlcc/ %s:%s' % (
+            bundle_target, target, bundle_target)])
+    self.run(copy_to_container)
 
   def _execute_one_non_raising(self, student_email):
     try:
