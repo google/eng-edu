@@ -396,7 +396,10 @@ class ProjectsCreate(Command):
         'by dashes (i.e. XXXXXX-XXXXXX-XXXXXX).', required=True)
     parser.add_argument(
         '--content_bundle', help='An optional name of the tar.gz file with the '
-        'content bundle to deploy to each Datalab VM.')
+        'content bundle to deploy to each Datalab VM. This could be a name of '
+        'the local file (i.e. ~/my_notebooks.tar.gz) or a name of a file in '
+        'the Google Cloud Storage Bucket '
+        '(i.e. gs://my_busket/my_notebooks.tar.gz).')
     parser.add_argument(
         '--image_name', help='An optional name of the specific VM image to '
         'pass into "datalab create". Default image will be used if no value '
