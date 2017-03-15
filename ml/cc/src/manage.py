@@ -775,7 +775,7 @@ class ProjectsDelete(Command):
     parser.add_argument(
         '--prefix', help='A unique prefix for student project '
         'names. A portion of student email will be appended to it to create '
-        'a unique project name.', required=True)
+        'a unique project name.', required=False)
     parser.add_argument(
         '--project_ids',
         help='A space-separated list of project ids. '
@@ -796,6 +796,7 @@ class ProjectsDelete(Command):
     return parser
 
   def _parse_args(self, args):
+    self.prefix = args.prefix
     self.student_emails = None
     if args.students:
       self.student_emails = args.students.lower().split(' ')
@@ -806,7 +807,12 @@ class ProjectsDelete(Command):
         'Please provide --student_emails or --project_ids.')
     assert not(self.student_emails and self.project_ids), (
         'Please provide --student_emails or --project_ids, not both.')
-    self.prefix = args.prefix
+    if self.student_emails:
+      assert self.student_emails and self.prefix, (
+          'Please provide --prefix when providing --student_emails.')
+    else:
+      assert not self.prefix, (
+          'The --prefix can\'t be specified when providing --project_ids.')
 
   def delete_project(self, project_id):
     if not active_project_exists(self, project_id):
@@ -1349,6 +1355,26 @@ class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
           '--project_ids', 'id1 id2',
       ])
 
+  def test_delete_does_not_need_prefix(self):
+    with self.assertRaisesRegexp(Exception,
+                                 'The --prefix can\'t be specified when '
+                                 'providing --project_ids.'):
+      self._run([
+          'python', self.GCLOUD_PY, 'projects_delete', '--no_tests',
+          '--dry_run', '--prefix', 'foo',
+          '--project_ids', 'id1 id2',
+      ])
+
+  def test_delete_needs_prefix(self):
+    with self.assertRaisesRegexp(Exception,
+                                 'Please provide --prefix when providing '
+                                 '--student_emails.'):
+      self._run([
+          'python', self.GCLOUD_PY, 'projects_delete', '--no_tests',
+          '--dry_run',
+          '--students', 'student1@example.com student2@example.com',
+      ])
+
   def test_projects_delete_by_student_emails(self):
     self.maxDiff = None
 
@@ -1367,7 +1393,7 @@ class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
     out, err = self._run([
         'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
         '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
-        '--prefix', 'my-prefix', '--project_ids',
+        '--project_ids',
         'my-prefix--student1examplecom my-prefix--student2examplecom'])
 
     self.assertFalse(out)
