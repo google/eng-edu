@@ -559,18 +559,6 @@ class ProjectsCreate(Command):
     self.prefix = None
     self.zone = None
 
-  @classmethod
-  def add_common_args(cls, parser):
-    parser.add_argument(
-        '--prefix', help='A unique prefix for student project '
-        'names. A portion of student email will be appended to it to create '
-        'a unique project name.', required=True)
-    parser.add_argument(
-        '--students', help='A space-separated list of student\'s emails. '
-        'Students will be given a role of EDITOR in their respetive projects.',
-        required=True
-    )
-
   def _images_names(self):
     items = []
     for image_key, image_def in self.SUPPORTED_DATALAB_IMAGES.iteritems():
@@ -580,7 +568,6 @@ class ProjectsCreate(Command):
   def make_parser(self):
     """Creates default argument parser."""
     parser = self.default_parser(self)
-    self.add_common_args(parser)
     parser.add_argument(
         '--billing_id', help='A billing account ID you would like to '
         'use to cover the costs of running student projects. You can find this '
@@ -605,11 +592,20 @@ class ProjectsCreate(Command):
         'your email as well as those of Teaching Assistants . Owners will be '
         'given a role of OWNER in all student projects.', required=True)
     parser.add_argument(
+        '--prefix', help='A unique prefix for student project '
+        'names. A portion of student email will be appended to it to create '
+        'a unique project name.', required=True)
+    parser.add_argument(
         '--provision_vm', help='Whether to re-provision Datalab VMs in the '
         'existing projects. If set, existing Datalab VMs will be deleted and '
         'new Datalab VMs will be provisioned: there is NO UNDO. If not set, '
         'existing project VMs will not be altered, but fresh VMs will be '
         'provisioned in the newly created projects.', action='store_true')
+    parser.add_argument(
+        '--students', help='A space-separated list of student\'s emails. '
+        'Students will be given a role of EDITOR in their respetive projects.',
+        required=True
+    )
     parser.add_argument(
         '--zone', help='A name of the Google Cloud Platform zone to host '
         'your resources.', default='us-central1-a')
@@ -776,28 +772,72 @@ class ProjectsDelete(Command):
   def make_parser(self):
     """Creates default argument parser."""
     parser = self.default_parser(self)
-    ProjectsCreate.add_common_args(parser)
+    parser.add_argument(
+        '--prefix', help='A unique prefix for student project '
+        'names. A portion of student email will be appended to it to create '
+        'a unique project name.', required=True)
+    parser.add_argument(
+        '--project_ids',
+        help='A space-separated list of project ids. '
+        'A project with each specified id will be deleted.',
+        required=False
+    )
+    parser.add_argument(
+        '--provision_vm', help='Whether to re-provision Datalab VMs in the '
+        'existing projects. If set, existing Datalab VMs will be deleted and '
+        'new Datalab VMs will be provisioned: there is NO UNDO. If not set, '
+        'existing project VMs will not be altered, but fresh VMs will be '
+        'provisioned in the newly created projects.', action='store_true')
+    parser.add_argument(
+        '--students', help='A space-separated list of student\'s emails. '
+        'A project for each specified student will be deleted.',
+        required=False
+    )
     return parser
 
   def _parse_args(self, args):
-    self.student_emails = args.students.lower().split(' ')
+    self.student_emails = None
+    if args.students:
+      self.student_emails = args.students.lower().split(' ')
+    self.project_ids = None
+    if args.project_ids:
+      self.project_ids = args.project_ids.lower().split(' ')
+    assert self.student_emails or self.project_ids, (
+        'Please provide --student_emails or --project_ids.')
+    assert not(self.student_emails and self.project_ids), (
+        'Please provide --student_emails or --project_ids, not both.')
     self.prefix = args.prefix
+
+  def delete_project(self, project_id):
+    if not active_project_exists(self, project_id):
+      LOG.warning('Project not found; unable to delete: %s', project_id)
+    else:
+      delete_project = Task('Deleting project %s' % project_id, [
+          self.args.gcloud_bin, '--quiet', 'alpha', 'projects', 'delete',
+          project_id])
+      self.run(delete_project)
+
+  def delete_by_student_emails(self, student_emails):
+    for student_email in student_emails:
+      project_id = ProjectsCreate.project_id(self.prefix, student_email)
+      self.delete_project(project_id)
+
+  def delete_by_project_ids(self, project_ids):
+    for project_id in project_ids:
+      self.delete_project(project_id)
 
   def execute(self):
     """Deletes projects in bulk."""
     self._parse_args(self.args)
-    LOG.info('Deleting Datalab VM projects for %s students',
-             len(self.student_emails))
     setup_gcloud_components(self)
-    for student_email in self.student_emails:
-      project_id = ProjectsCreate.project_id(self.prefix, student_email)
-      if not active_project_exists(self, project_id):
-        LOG.warning('Project not found; unable to delete: %s', project_id)
-      else:
-        delete_project = Task('Deleting project %s' % project_id, [
-            self.args.gcloud_bin, '--quiet', 'alpha', 'projects', 'delete',
-            project_id])
-        self.run(delete_project)
+    if self.student_emails:
+      LOG.info('Deleting Datalab VM projects for %s students',
+               len(self.student_emails))
+      self.delete_by_student_emails(self.student_emails)
+    if self.project_ids:
+      LOG.info('Deleting Datalab VM projects for %s project ids',
+               len(self.project_ids))
+      self.delete_by_project_ids(self.project_ids)
 
 
 class DatalabCommonMixin(object):
@@ -930,6 +970,7 @@ Connecting Cloud Shell Web Preview port 8081 to a running Datalab VM
                 'datalab', 'connect', vm_name, '--project', project_id,
                 '--zone', zone, '--no-launch-browser'])
     self.run(connect_to)
+    # TODO(psimakov): somehow this does not work in the Cloud Shell; why?
 
 
 class DatalabDelete(Command, DatalabCommonMixin):
@@ -1087,6 +1128,8 @@ class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
       os.path.dirname(__file__), 'test_projects_create_image.txt')
   EXPECTED_PROJECTS_DELETE = os.path.join(
       os.path.dirname(__file__), 'test_projects_delete.txt')
+  EXPECTED_PROJECTS_DELETE_BY_ID = os.path.join(
+      os.path.dirname(__file__), 'test_projects_delete_by_id.txt')
   EXPECTED_PROJECTS_DELETE_MISSING = os.path.join(
       os.path.dirname(__file__), 'test_projects_delete_missing.txt')
   EXPECTED_PROJECTS_CONTENT_BUNDLE = os.path.join(
@@ -1287,7 +1330,26 @@ class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
     self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_IMAGE)
     self._assert_account_list(out)
 
-  def test_projects_delete(self):
+  def test_delete_no_args(self):
+    with self.assertRaisesRegexp(Exception,
+                                 'Please provide --student_emails or '
+                                 '--project_ids.'):
+      self._run([
+          'python', self.GCLOUD_PY, 'projects_delete', '--no_tests',
+          '--dry_run', '--prefix', 'foo'])
+
+  def test_delete_too_many_args(self):
+    with self.assertRaisesRegexp(Exception,
+                                 'Please provide --student_emails or '
+                                 '--project_ids, not both.'):
+      self._run([
+          'python', self.GCLOUD_PY, 'projects_delete', '--no_tests',
+          '--dry_run', '--prefix', 'foo',
+          '--students', 'student1@example.com student2@example.com',
+          '--project_ids', 'id1 id2',
+      ])
+
+  def test_projects_delete_by_student_emails(self):
     self.maxDiff = None
 
     out, err = self._run([
@@ -1298,6 +1360,18 @@ class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
 
     self.assertFalse(out)
     self.assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE)
+
+  def test_projects_delete_by_project_ids(self):
+    self.maxDiff = None
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'projects_delete', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(self.MOCK_RESP_YES_PROJECTS_YES_VMS),
+        '--prefix', 'my-prefix', '--project_ids',
+        'my-prefix--student1examplecom my-prefix--student2examplecom'])
+
+    self.assertFalse(out)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE_BY_ID)
 
   def test_projects_delete_missing(self):
     self.maxDiff = None
