@@ -1,0 +1,7 @@
+'gcloud', 'config', 'get-value', 'project'
+'sudo', 'gcloud', '--quiet', 'components', 'update'
+'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha', 'datalab'
+'gcloud', 'service-management', 'enable', 'compute_component', '--project', 'my-sample-project-123'
+'gcloud', 'service-management', 'enable', 'ml.googleapis.com', '--project', 'my-sample-project-123'
+'gcloud', 'compute', 'instances', 'describe', '--project', 'my-sample-project-123', '--zone', 'us-central1-a', 'mlccvm-testuser'
+'datalab', 'create', 'mlccvm-testuser', '--project', 'my-sample-project-123', '--zone', 'us-central1-a', '--no-connect'

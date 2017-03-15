@@ -3,7 +3,38 @@
 # Copyright 2017 Google Inc. All Rights Reserved.
 #
 
-"""Classes for automation and management of Google Cloud Platform tasks."""
+"""Classes for automation and management of Google Cloud Platform tasks.
+
+We present a specialized command-line utility for automation and management
+of Google Cloud Platform tasks. It can execute numerous functions and has
+many options that control its behavior.
+
+
+Fundamentally, its a simple layer directly on top of Google Cloud SDK
+command-line tools gcloud and gsutils. We don't use any Python client libraries
+for Google Cloud APIs. We simply call gcloud and gsutils with a lot of
+arguments. We do it from multiple threads and with good error recovery. Trust
+me, it's much easier to do it all in Python than in bash.
+
+
+Numerous commands and command-line options are available. To see a full list
+run the following:
+
+    python ./eng-edu/ml/cc/src/manage.py
+
+
+Numerous tests are available to validate the package. To execute all tests
+run the following:
+
+    python ./eng-edu/ml/cc/src/manage.py tests_run
+
+
+The most recent Google Cloud SDK (https://cloud.google.com/sdk/downloads) is
+requred to execute actual provisioning commands. Tests require only Python 2.7.
+
+
+Good luck!
+"""
 
 __author__ = 'Pavel Simakov (psimakov@google.com)'
 
@@ -53,6 +84,16 @@ def _pickle_method(m):
     return getattr, (m.im_self, m.im_func.func_name)
 
 
+def args_to_str(args):
+  results = []
+  for arg in args:
+    if ' ' in arg:
+      results.append('"%s"' % arg)
+    else:
+      results.append(arg)
+  return ' '.join(results)
+
+
 # permits serialization of instance methods for multiprocessing
 copy_reg.pickle(types.MethodType, _pickle_method)
 
@@ -78,12 +119,13 @@ class Task(object):
           stderr=subprocess.PIPE)
     except Exception as e:  # pylint: disable=broad-except
       if not self.expect_errors:
-        LOG.error('Command failed: %s; %s', self.args, e)
+        LOG.error('Command failed: %s; %s', args_to_str(self.args), e)
       raise
     stdout, stderr = child.communicate()
     if child.returncode:
       raise Exception('Command failed with an error code %s: %s\n(%s)\n(%s)' % (
-          child.returncode, self.args, to_unicode(stderr), to_unicode(stdout)))
+          child.returncode, args_to_str(self.args),
+          to_unicode(stderr), to_unicode(stdout)))
     return to_unicode(stdout), to_unicode(stderr)
 
 
@@ -98,18 +140,21 @@ class Command(object):
     """Runs a task as fake shell command, returns no result."""
     if task.caption:
       LOG.info(task.caption)
-    LOG.info('Dry run: %s', task.args)
+    LOG.info('Shell: %s', task.args)
     if self.args.mock_gcloud_data:
       mock_responses = json.loads(self.args.mock_gcloud_data)
     else:
       mock_responses = {}
-    key = ' '.join(task.args)
+    key = None
+    if task.args:
+      key = ' '.join(str(item) for item in task.args)
     mock_response = mock_responses.get(key, None)
     if not mock_response:
       return None, None
     ret_code, ret_value = mock_response
     if ret_code:
-      raise Exception('Error %s executing command: %s', ret_code, self.args)
+      raise Exception('Error %s executing command: %s',
+                      ret_code, args_to_str(task.args))
     return ret_value, None
 
   def real_run_cmd(self, task):
@@ -120,15 +165,18 @@ class Command(object):
     try_count = 0
     while True:
       try:
+        if self.args and self.args.verbose:
+          LOG.info('Shell: %s', args_to_str(task.args))
         return task._run_once()
       except Exception as e:  # pylint: disable=broad-except
         try_count += 1
         if task.max_try_count <= try_count:
           if not task.expect_errors:
             LOG.warning('Command failed permanently after %s retries: %s; %s',
-                        try_count, task.args, e)
+                        try_count, args_to_str(task.args), e)
           raise
-        LOG.warning('Retrying failed command: %s; %s', task.args, e)
+        LOG.warning('Retrying failed command: %s; %s',
+                    args_to_str(task.args), e)
 
   @classmethod
   def run(cls, task):
@@ -169,6 +217,9 @@ class Command(object):
         action='store_true')
     parser.add_argument(
         '--no_tests', help='Whether to skip running tests.',
+        action='store_true')
+    parser.add_argument(
+        '--verbose', help='Whether to print detailed logging information.',
         action='store_true')
     return parser
 
@@ -225,6 +276,9 @@ class Command(object):
       finally:
         LOG = original_log
 
+    if cmd_args.dry_run:
+      LOG.warning('Dry run -- no actual commands will be executed!!!')
+
     LOG.info('Started %s', cmd_args.action)
     if cmd_args.serial:
       LOG.info('Disabling concurrent execution')
@@ -254,6 +308,20 @@ class Command(object):
     raise NotImplementedError()
 
 
+def get_vm_name_for_username(username):
+  vm_id = re.sub(r'[^A-Za-z0-9]+', '', username)
+  return 'mlccvm-%s' % vm_id
+
+
+def get_user_consent_to(cmd, message):
+  if not cmd.args.dry_run:
+    user_action = raw_input(
+        '\n\n\nWARNING!!!\n'
+        '%s'
+        '\n\n\nDo you want to continue (y/n)?' % message)
+    assert user_action in ['y', 'Y'], 'Cancelled by user'
+
+
 def setup_gcloud_components(cmd):
   update_comp = Task('Updating components', [
       'sudo', cmd.args.gcloud_bin, '--quiet', 'components', 'update'])
@@ -262,6 +330,117 @@ def setup_gcloud_components(cmd):
       'sudo', cmd.args.gcloud_bin, '--quiet', 'components', 'install',
       'alpha', 'datalab'])
   cmd.run(install_comp)
+
+
+def enable_compute_and_ml_apis(cmd, project_id):
+  enable_compute = Task('Enabling Compute API', [
+      cmd.args.gcloud_bin, 'service-management', 'enable',
+      'compute_component', '--project', project_id])
+  enable_compute.max_try_count = 3
+  cmd.run(enable_compute)
+
+  enable_ml = Task('Enabling ML API', [
+      cmd.args.gcloud_bin, 'service-management', 'enable',
+      'ml.googleapis.com', '--project', project_id])
+  enable_ml.max_try_count = 3
+  cmd.run(enable_ml)
+
+
+def provision_vm(cmd, student_email, project_id, zone, vm_name, image_name,
+                 can_delete):
+  if check_vm_exists(cmd, project_id, zone, vm_name):
+    if not can_delete:
+      LOG.warning('Skipping Datalab VM provisioning; existing VM found')
+      return False
+    delete_vm = Task('Deleting existing Datalab VM', [
+        cmd.args.gcloud_bin, '--quiet', 'compute', 'instances', 'delete',
+        vm_name, '--project', project_id,
+        '--zone', zone, '--delete-disks', 'all'])
+    cmd.run(delete_vm)
+
+    # wait while deletion completes
+    while not cmd.args.dry_run:
+      if not check_vm_exists(cmd, project_id, zone, vm_name):
+        break
+      else:
+        wait_2_s = Task('Waiting for instance deletion', ['sleep', '2'])
+        cmd.run(wait_2_s)
+
+  create_vm = Task('Provisioning new Datalab VM', [
+      'datalab', 'create', vm_name])
+  if student_email:
+    create_vm.append(['--for-user', student_email])
+  create_vm.append([
+      '--project', project_id, '--zone', zone, '--no-connect'])
+  if image_name:
+    create_vm.append(['--image-name', image_name])
+  cmd.run(create_vm)
+  return True
+
+
+def deploy_content_bundle(cmd, project_id, zone, vm_name):
+  """Deploys content to the Datalab VM."""
+  bundle_source = './mlcc-tmp/content_bundle/Downloads/mlcc/'
+  bundle_target = '/content/datalab/notebooks/Downloads/'
+
+  LOG.info('Deploying content bundle')
+  delete_remote = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+      '--project', project_id, '--zone', zone, '--command',
+      'rm -r ~%smlcc/ || true' % bundle_target])
+  cmd.run(delete_remote)
+  create_remote = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+      '--project', project_id, '--zone', zone, '--command',
+      'mkdir -p ~%smlcc/' % bundle_target])
+  cmd.run(create_remote)
+  copy_to_remote = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'copy-files',
+      '--project', project_id, '--zone', zone,
+      bundle_source,
+      '%s:~%s' % (vm_name, bundle_target)])
+  cmd.run(copy_to_remote)
+
+  # wait while Docker starts up
+  target = None
+  while True:
+    docker_ps = Task(None, [
+        cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+        '--project', project_id, '--zone', zone, '--command',
+        'docker ps --format "{{.ID}}\t{{.Image}}"'])
+    out, _ = cmd.run(docker_ps)
+    if out:
+      for line in out.strip().split('\n')[1:]:
+        parts = line.split('\t')
+        if parts[1].startswith(DOCKER_IMAGE_PREFIX):
+          target = parts[0]
+          break
+    if target or cmd.args.dry_run:
+      break
+    else:
+      wait_15_s = Task(
+          'Waiting for Docker container %s...' % DOCKER_IMAGE_PREFIX,
+          ['sleep', '15'])
+      cmd.run(wait_15_s)
+
+  clean_container = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+      '--project', project_id, '--zone', zone, '--command',
+      'docker exec %s rm -rf %smlcc/' % (target, bundle_target)])
+  cmd.run(clean_container)
+
+  init_container = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+      '--project', project_id, '--zone', zone, '--command',
+      'docker exec %s mkdir -p %smlcc/' % (target, bundle_target)])
+  cmd.run(init_container)
+
+  copy_to_container = Task(None, [
+      cmd.args.gcloud_bin, 'compute', 'ssh', vm_name,
+      '--project', project_id, '--zone', zone, '--command',
+      'docker cp ~%smlcc/ %s:%s' % (
+          bundle_target, target, bundle_target)])
+  cmd.run(copy_to_container)
 
 
 def active_project_exists(cmd, project_id):
@@ -342,6 +521,20 @@ class ContentBundleContext(object):
       remove_tmp = Task(None, [
           'rm', '-rf', './mlcc-tmp/'])
       self.cmd.run(remove_tmp)
+
+
+class RunTests(Command):
+  """An action that runs all tests."""
+
+  NAME = 'tests_run'
+
+  def make_parser(self):
+    """Creates default argument parser."""
+    return self.default_parser(self)
+
+  def execute(self):
+    """Runs all tests."""
+    pass
 
 
 class ProjectsCreate(Command):
@@ -461,8 +654,7 @@ class ProjectsCreate(Command):
   def vm_name(cls, email):
     parts = email.split('@')
     assert len(parts) > 1, 'Bad email: %s' % email
-    vm_id = re.sub(r'[^A-Za-z0-9]+', '', parts[0])
-    return 'mlccvm-%s' % vm_id
+    return get_vm_name_for_username(parts[0])
 
   def assert_emails_and_project_ids_are_unique(self):
     projects_ids = {}
@@ -509,104 +701,7 @@ class ProjectsCreate(Command):
         'link', project_id, '--account-id', self.billing_id])
     self.run(enable_billing)
 
-    enable_compute = Task('Enabling Compute API', [
-        self.args.gcloud_bin, 'service-management', 'enable',
-        'compute_component', '--project', project_id])
-    enable_compute.max_try_count = 3
-    self.run(enable_compute)
-
-    enable_ml = Task('Enabling ML API', [
-        self.args.gcloud_bin, 'service-management', 'enable',
-        'ml.googleapis.com', '--project', project_id])
-    enable_ml.max_try_count = 3
-    self.run(enable_ml)
-
-  def provision_vm(self, student_email, project_id, vm_name):
-    if check_vm_exists(self, project_id, self.zone, vm_name):
-      delete_vm = Task('Deleting existing Datalab VM', [
-          self.args.gcloud_bin, '--quiet', 'compute', 'instances', 'delete',
-          vm_name, '--project', project_id,
-          '--zone', self.zone, '--delete-disks', 'all'])
-      self.run(delete_vm)
-
-      # wait while deletion completes
-      while not self.args.dry_run:
-        if not check_vm_exists(self, project_id, self.zone, vm_name):
-          break
-        else:
-          wait_2_s = Task('Waiting for instance deletion', ['sleep', '2'])
-          self.run(wait_2_s)
-
-    create_vm = Task('Provisioning new Datalab VM', [
-        'datalab', 'create', vm_name, '--for-user', student_email,
-        '--project', project_id, '--zone', self.zone, '--no-connect'])
-    if self.image_name:
-      create_vm.append(['--image-name', self.image_name])
-    self.run(create_vm)
-
-  def deploy_content_bundle(self, project_id, vm_name):
-    """Deploys content to the Datalab VM."""
-    bundle_source = './mlcc-tmp/content_bundle/Downloads/mlcc/'
-    bundle_target = '/content/datalab/notebooks/Downloads/'
-
-    LOG.info('Deploying content bundle')
-    delete_remote = Task(None, [
-        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-        '--project', project_id, '--zone', self.zone, '--command',
-        'rm -r ~%smlcc/ || true' % bundle_target])
-    self.run(delete_remote)
-    create_remote = Task(None, [
-        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-        '--project', project_id, '--zone', self.zone, '--command',
-        'mkdir -p ~%smlcc/' % bundle_target])
-    self.run(create_remote)
-    copy_to_remote = Task(None, [
-        self.args.gcloud_bin, 'compute', 'copy-files',
-        '--project', project_id, '--zone', self.zone,
-        bundle_source,
-        '%s:~%s' % (vm_name, bundle_target)])
-    self.run(copy_to_remote)
-
-    # wait while Docker starts up
-    target = None
-    while True:
-      docker_ps = Task(None, [
-          self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-          '--project', project_id, '--zone', self.zone, '--command',
-          'docker ps --format "{{.ID}}\t{{.Image}}"'])
-      out, _ = self.run(docker_ps)
-      if out:
-        for line in out.strip().split('\n')[1:]:
-          parts = line.split('\t')
-          if parts[1].startswith(DOCKER_IMAGE_PREFIX):
-            target = parts[0]
-            break
-      if target or self.args.dry_run:
-        break
-      else:
-        wait_15_s = Task(
-            'Waiting for Docker container %s...' % DOCKER_IMAGE_PREFIX,
-            ['sleep', '15'])
-        self.run(wait_15_s)
-
-    clean_container = Task(None, [
-        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-        '--project', project_id, '--zone', self.zone, '--command',
-        'docker exec %s rm -rf %smlcc/' % (target, bundle_target)])
-    self.run(clean_container)
-
-    init_container = Task(None, [
-        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-        '--project', project_id, '--zone', self.zone, '--command',
-        'docker exec %s mkdir -p %smlcc/' % (target, bundle_target)])
-    self.run(init_container)
-
-    copy_to_container = Task(None, [
-        self.args.gcloud_bin, 'compute', 'ssh', vm_name,
-        '--project', project_id, '--zone', self.zone, '--command',
-        'docker cp ~%smlcc/ %s:%s' % (
-            bundle_target, target, bundle_target)])
-    self.run(copy_to_container)
+    enable_compute_and_ml_apis(self, project_id)
 
   def _execute_one_non_raising(self, student_email):
     try:
@@ -633,10 +728,11 @@ class ProjectsCreate(Command):
         need_to_provision_vm = False
 
     if need_to_provision_vm:
-      self.provision_vm(student_email, project_id, vm_name)
+      provision_vm(self, student_email, project_id, self.zone, vm_name,
+                   self.image_name, True)
 
     if self.bundle:
-      self.deploy_content_bundle(project_id, vm_name)
+      deploy_content_bundle(self, project_id, self.zone, vm_name)
 
     return student_email, project_id, vm_name, self._project_home(project_id)
 
@@ -704,6 +800,202 @@ class ProjectsDelete(Command):
         self.run(delete_project)
 
 
+class DatalabCommonMixin(object):
+  """A mixin with common helper functions."""
+
+  def resolve_zone_for(self, project_id, vm_name):
+    find_vm = Task(None, [
+        self.args.gcloud_bin, 'compute', 'instances', 'list',
+        '--project', project_id, '--limit', '1',
+        '--filter', 'name:%s' % vm_name, '--format', 'value(zone)'])
+    out, _ = self.run(find_vm)
+    zone = None
+    if out:
+      zone = str(out).strip()
+    return zone
+
+  def get_project_id_and_vm_name(self):
+    username = os.environ.get('USER', None)
+    assert username, 'Failed to determine current username'
+
+    vm_name = get_vm_name_for_username(username)
+    get_current_project_id = Task(None, [
+        self.args.gcloud_bin, 'config', 'get-value', 'project'])
+    out, _ = self.run(get_current_project_id)
+    project_id = None
+    if out:
+      project_id = str(out).strip()
+    assert project_id or self.args.dry_run, (
+        'Failed to determine current project')
+    return project_id, vm_name
+
+
+class DatalabCreate(Command, DatalabCommonMixin):
+  """An action that creates a Datalab VM in the current project."""
+
+  NAME = 'datalab_create'
+  REQUIRED_IMAGE_URL_PREFIX = 'gcr.io/'
+
+  def make_parser(self):
+    """Creates default argument parser."""
+    parser = self.default_parser(self)
+    parser.add_argument(
+        '--content_bundle', help='An optional name of the tar.gz file with the '
+        'content bundle to deploy to each Datalab VM. This could be a name of '
+        'the local file (i.e. ~/my_notebooks.tar.gz) or a name of a file in '
+        'the Google Cloud Storage Bucket '
+        '(i.e. gs://my_busket/my_notebooks.tar.gz).')
+    parser.add_argument(
+        '--image_url', help='An optional URL of the specific VM image to '
+        'pass into "datalab create", for example: '
+        '"gcr.io/cloud-datalab/datalab:local-20170127". Default image will '
+        'be used if no value is provided.')
+    parser.add_argument(
+        '--provision_vm', help='Whether to re-provision Datalab VM. '
+        'If set, existing Datalab VM will be deleted and '
+        'new Datalab VM will be provisioned: there is NO UNDO. If not set, '
+        'existing Datalab VM will not be altered, but fresh VM will be '
+        'provisioned if none exists.', action='store_true')
+    parser.add_argument(
+        '--zone', help='A name of the Google Cloud Platform zone to host '
+        'your resources.', default='us-central1-a')
+    return parser
+
+  def execute(self):
+    """Creates a Datalab VM in the current project."""
+    if self.args.image_url:
+      assert self.args.image_url.startswith(self.REQUIRED_IMAGE_URL_PREFIX), (
+          'Image URL must start with %s' % self.REQUIRED_IMAGE_URL_PREFIX)
+
+    project_id, vm_name = self.get_project_id_and_vm_name()
+
+    get_user_consent_to(
+        self,
+        '1. Project %s will be altered: Google Compute Engine and Cloud '
+        'Machine Learning APIs will be enabled.\n'
+        '2. A Datalab VM %s will be created or re-provisioned in zone %s.' % (
+            project_id, vm_name, self.args.zone))
+
+    LOG.info('Provisioning Datalab VM %s in project %s', vm_name, project_id)
+
+    setup_gcloud_components(self)
+    enable_compute_and_ml_apis(self, project_id)
+
+    provisioned = provision_vm(self, None, project_id, self.args.zone, vm_name,
+                               self.args.image_url, self.args.provision_vm)
+    if provisioned and self.args.content_bundle:
+      deploy_content_bundle(self, project_id, self.args.zone, vm_name)
+
+
+class DatalabConnect(Command, DatalabCommonMixin):
+  """An action that connects to a Datalab VM of the current project."""
+
+  NAME = 'datalab_connect'
+
+  CTRL_C_MSG = '''
+
+Connecting Cloud Shell Web Preview port 8081 to a running Datalab VM
+
+###################################################################
+### The following command will not exit until CTRL-C is pressed ###
+###################################################################
+
+'''
+
+  def make_parser(self):
+    """Creates default argument parser."""
+    return self.default_parser(self)
+
+  def execute(self):
+    """Connects Cloud Shell to a Datalab VM of the current project."""
+
+    # TODO(psimakov): how to assert we are in the Cloud Shell?
+    LOG.warning('Make sure you run this command from the Google Cloud Shell. '
+                'We unable to verify this automatically.')
+
+    project_id, vm_name = self.get_project_id_and_vm_name()
+    zone = self.resolve_zone_for(project_id, vm_name)
+
+    supress_assert = self.args.dry_run and not self.args.mock_gcloud_data
+    if not supress_assert:
+      assert zone, 'Datalab VM %s not found in project %s' % (
+          vm_name, project_id)
+
+    setup_gcloud_components(self)
+
+    LOG.info(self.CTRL_C_MSG)
+    connect_to = Task(
+        'Connecting to Datalab VM %s in zone %s in project %s' % (
+            vm_name, zone, project_id), [
+                'datalab', 'connect', vm_name, '--project', project_id,
+                '--zone', zone, '--no-launch-browser'])
+    self.run(connect_to)
+
+
+class DatalabDelete(Command, DatalabCommonMixin):
+  """An action that deletes a Datalab VM in the current project."""
+
+  NAME = 'datalab_delete'
+
+  def make_parser(self):
+    """Creates default argument parser."""
+    return self.default_parser(self)
+
+  def execute(self):
+    """Deletes a Datalab VM in the current project."""
+    project_id, vm_name = self.get_project_id_and_vm_name()
+    zone = self.resolve_zone_for(project_id, vm_name)
+
+    supress_assert = self.args.dry_run and not self.args.mock_gcloud_data
+    if not supress_assert:
+      assert zone, 'Datalab VM %s not found in project %s' % (
+          vm_name, project_id)
+
+    get_user_consent_to(
+        self,
+        '1. Project %s will be altered.\n'
+        '2. Datalab VM %s in zone %s and ALL ITS DISKS AND DATA will be '
+        'deleted forever.' % (project_id, vm_name, zone))
+
+    delete_vm = Task('Deleting Datalab VM and its disks', [
+        self.args.gcloud_bin, '--quiet', 'compute', 'instances', 'delete',
+        vm_name, '--project', project_id, '--zone', zone, '--delete-disks',
+        'all'])
+    self.run(delete_vm)
+
+    delete_component = Task(
+        'Removing Datalab components and tools from the gcloud shell',
+        ['sudo', self.args.gcloud_bin, '--quiet', 'components', 'remove',
+         'datalab'])
+    self.run(delete_component)
+
+
+# TODO(psimakov): move all tests out
+class CommonTestMixin(object):
+  """A mixin that has test helper functions."""
+
+  PREFIX = ' | Shell: ['
+  GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'manage.py')
+
+  def filter_log(self, items):
+    """Extracts only the log lines that contain shell commands."""
+    results = []
+    for item in items:
+      index = item.find(self.PREFIX)
+      if index == -1:
+        continue
+      results.append(item[index + len(self.PREFIX): -1])
+    results.append(u'')  # to match the new line at the end of the data file
+    return results
+
+  def assert_file_equals(self, actual, fn):
+    """Asserts that file content is equal to data."""
+    with open(fn, 'r') as expected:
+      self.assertEquals(
+          to_unicode(expected.read()).split('\n'),
+          self.filter_log(actual.split('\n')))
+
+
 class CoreTests(unittest.TestCase):
   """Tests."""
 
@@ -721,12 +1013,65 @@ class CoreTests(unittest.TestCase):
     self.assertEquals('mlccvm-foo', vm_name)
 
 
-class ArgsTests(unittest.TestCase):
-  """Tests."""
+class RetryTests(unittest.TestCase):
+  """Test task retires."""
 
-  PREFIX = ' | Dry run: ['
+  def test_not_retriable_is_not_retried(self):
 
-  GCLOUD_PY = os.path.join(os.path.dirname(__file__), 'manage.py')
+    class MyTask(Task):
+
+      def _run_once(self):
+        raise Exception('I always fail.')
+
+    with self.assertRaisesRegexp(Exception, 'I always fail.'):
+      Command().real_run_cmd(MyTask(None, []))
+
+  def test_retriable_is_retried(self):
+
+    class MyTask(Task):
+
+      def __init__(self):
+        super(MyTask, self).__init__(None, [])
+        self.try_count = 0
+
+      def _run_once(self):
+        self.try_count += 1
+        if self.try_count == 1:
+          raise Exception('I always fail once.')
+
+    with self.assertRaisesRegexp(Exception, 'I always fail once.'):
+      Command().real_run_cmd(MyTask())
+
+    task = MyTask()
+    task.max_try_count = 3
+    Command().real_run_cmd(task)
+    self.assertEquals(2, task.try_count)
+
+  def test_max_try_count_is_respected(self):
+
+    class MyTask(Task):
+
+      def __init__(self):
+        super(MyTask, self).__init__(None, [])
+        self.try_count = 0
+
+      def _run_once(self):
+        self.try_count += 1
+        raise Exception('I always fail even with retry.')
+
+    with self.assertRaisesRegexp(Exception, 'I always fail even with retry.'):
+      Command().real_run_cmd(MyTask())
+
+    task = MyTask()
+    task.max_try_count = 3
+    with self.assertRaisesRegexp(Exception, 'I always fail even with retry.'):
+      Command().real_run_cmd(task)
+    self.assertEquals(3, task.try_count)
+
+
+class ProjectCommandTests(unittest.TestCase, CommonTestMixin):
+  """Test projects commands."""
+
   EXPECTED_PROJECTS_CREATE = os.path.join(
       os.path.dirname(__file__), 'test_projects_create.txt')
   EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS = os.path.join(
@@ -814,12 +1159,6 @@ class ArgsTests(unittest.TestCase):
   def _run(self, args):
     return Command().real_run_cmd(Task(None, args))
 
-  def _assert_file_equals(self, actual, fn):
-    with open(fn, 'r') as expected:
-      self.assertEquals(
-          to_unicode(expected.read()).split('\n'),
-          self.filter_log(actual.split('\n')))
-
   def _assert_account_list(self, out):
     self.assertTrue(out)
     assert out.startswith('account-list-'), out
@@ -837,17 +1176,6 @@ class ArgsTests(unittest.TestCase):
           ''
       ], stream.read().split('\n'))
     os.remove(out[:-1])
-
-  def filter_log(self, items):
-    """Extracts only the log lines that contain shell commands."""
-    results = []
-    for item in items:
-      index = item.find(self.PREFIX)
-      if index == -1:
-        continue
-      results.append(item[index + len(self.PREFIX): -1])
-    results.append(u'')  # to match the new line at the end of the data file
-    return results
 
   def test_no_args(self):
     with self.assertRaisesRegexp(Exception, 'error: too few arguments'):
@@ -868,7 +1196,7 @@ class ArgsTests(unittest.TestCase):
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com'])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE)
     self._assert_account_list(out)
 
   def test_projects_create_project_exists(self):
@@ -883,7 +1211,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com',
         '--provision_vm'])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS)
     self._assert_account_list(out)
 
   def test_projects_create_project_exists_no_reprovision(self):
@@ -897,7 +1225,7 @@ class ArgsTests(unittest.TestCase):
         '--owners', 'owner1@example.com owner2@example.com',
         '--students', 'student1@example.com student2@example.com'])
 
-    self._assert_file_equals(
+    self.assert_file_equals(
         err, self.EXPECTED_PROJECTS_CREATE_PROJECT_EXISTS_NOREP)
     self._assert_account_list(out)
 
@@ -913,7 +1241,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com',
         '--provision_vm'])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_VM_EXISTS)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_VM_EXISTS)
     self._assert_account_list(out)
 
   def test_projects_create_with_labels(self):
@@ -928,7 +1256,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com',
         '--labels', 'foo=bar,alice=john'])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_LABELS)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_LABELS)
     self._assert_account_list(out)
 
   def test_projects_create_bad_image(self):
@@ -956,7 +1284,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com',
         '--image_name', 'TF_RC0'])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_IMAGE)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CREATE_IMAGE)
     self._assert_account_list(out)
 
   def test_projects_delete(self):
@@ -969,7 +1297,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com'])
 
     self.assertFalse(out)
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE)
 
   def test_projects_delete_missing(self):
     self.maxDiff = None
@@ -981,7 +1309,7 @@ class ArgsTests(unittest.TestCase):
         '--students', 'student1@example.com student2@example.com'])
 
     self.assertFalse(out)
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE_MISSING)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_DELETE_MISSING)
 
   def test_projects_create_concurrent(self):
     self.maxDiff = None
@@ -1035,71 +1363,131 @@ class ArgsTests(unittest.TestCase):
         '--content_bundle', os.path.join(
             os.path.dirname(__file__), 'test_content_bundle.tar.gz')])
 
-    self._assert_file_equals(err, self.EXPECTED_PROJECTS_CONTENT_BUNDLE)
+    self.assert_file_equals(err, self.EXPECTED_PROJECTS_CONTENT_BUNDLE)
     self._assert_account_list(out)
 
 
-class RetryTests(unittest.TestCase):
-  """Tests."""
+class DatalabCommandTests(unittest.TestCase, CommonTestMixin):
+  """Test datalab commands."""
 
-  def test_not_retriable_is_not_retried(self):
+  EXPECTED_DATALAB_CREATE = os.path.join(
+      os.path.dirname(__file__), 'test_datalab_create.txt')
+  EXPECTED_DATALAB_CREATE_EX = os.path.join(
+      os.path.dirname(__file__), 'test_datalab_create_ex.txt')
+  EXPECTED_DATALAB_CONNECT = os.path.join(
+      os.path.dirname(__file__), 'test_datalab_connect.txt')
+  EXPECTED_DATALAB_DELETE = os.path.join(
+      os.path.dirname(__file__), 'test_datalab_delete.txt')
 
-    class MyTask(Task):
+  def setUp(self):
+    super(DatalabCommandTests, self).setUp()
+    self.user = os.environ.get('USER', None)
+    os.environ['USER'] = 'testuser'
 
-      def _run_once(self):
-        raise Exception('I always fail.')
+  def tearDown(self):
+    os.environ['USER'] = self.user
+    super(DatalabCommandTests, self).tearDown()
 
-    with self.assertRaisesRegexp(Exception, 'I always fail.'):
-      Command().real_run_cmd(MyTask(None, []))
+  def _run(self, args):
+    return Command().real_run_cmd(Task(None, args))
 
-  def test_retriable_is_retried(self):
+  def test_create_minimal_args(self):
+    self.maxDiff = None
 
-    class MyTask(Task):
+    mock_response_data = {
+        'gcloud config get-value project': (0, 'my-sample-project-123'),
+        'gcloud compute instances describe --project my-sample-project-123 '
+        '--zone us-central1-a mlccvm-testuser': (1, None)}
 
-      def __init__(self):
-        super(MyTask, self).__init__(None, [])
-        self.try_count = 0
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'datalab_create', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(mock_response_data),
+        '--provision_vm'])
 
-      def _run_once(self):
-        self.try_count += 1
-        if self.try_count == 1:
-          raise Exception('I always fail once.')
+    self.assertFalse(out)
+    self.assert_file_equals(err, self.EXPECTED_DATALAB_CREATE)
 
-    with self.assertRaisesRegexp(Exception, 'I always fail once.'):
-      Command().real_run_cmd(MyTask())
+  def test_create_bad_image_url(self):
+    with self.assertRaisesRegexp(Exception,
+                                 'Image URL must start with gcr.io/'):
+      self._run([
+          'python', self.GCLOUD_PY, 'datalab_create', '--no_tests', '--dry_run',
+          '--image_url', 'foo/gcr.io/cloud-datalab/datalab:testimage'])
 
-    task = MyTask()
-    task.max_try_count = 3
-    Command().real_run_cmd(task)
-    self.assertEquals(2, task.try_count)
+  def test_create_all_args(self):
+    self.maxDiff = None
 
-  def test_max_try_count_is_respected(self):
+    mock_response_data = {
+        'gcloud config get-value project': (0, 'my-sample-project-123\n')}
 
-    class MyTask(Task):
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'datalab_create', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(mock_response_data),
+        '--provision_vm', '--zone', 'test-zone',
+        '--image_url', 'gcr.io/cloud-datalab/datalab:testimage',
+        '--content_bundle', os.path.join(
+            os.path.dirname(__file__), 'test_content_bundle.tar.gz')])
 
-      def __init__(self):
-        super(MyTask, self).__init__(None, [])
-        self.try_count = 0
+    self.assertFalse(out)
+    self.assert_file_equals(err, self.EXPECTED_DATALAB_CREATE_EX)
 
-      def _run_once(self):
-        self.try_count += 1
-        raise Exception('I always fail even with retry.')
+  def test_connect(self):
+    self.maxDiff = None
 
-    with self.assertRaisesRegexp(Exception, 'I always fail even with retry.'):
-      Command().real_run_cmd(MyTask())
+    mock_response_data = {
+        'gcloud config get-value project': (0, 'my-sample-project-123\n'),
+        'gcloud compute instances list --project my-sample-project-123 '
+        '--limit 1 --filter name:mlccvm-testuser --format value(zone)': (
+            0, 'testzone')}
 
-    task = MyTask()
-    task.max_try_count = 3
-    with self.assertRaisesRegexp(Exception, 'I always fail even with retry.'):
-      Command().real_run_cmd(task)
-    self.assertEquals(3, task.try_count)
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'datalab_connect', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(mock_response_data)])
+
+    self.assertFalse(out)
+    self.assert_file_equals(err, self.EXPECTED_DATALAB_CONNECT)
+
+  def test_connect_no_vm(self):
+    mock_response_data = {
+        'gcloud config get-value project': (0, 'my-sample-project-123\n'),
+        'gcloud compute instances list --project my-sample-project-123 '
+        '--limit 1 --filter name:mlccvm-testuser --format value(zone)': (
+            0, None)}
+    with self.assertRaisesRegexp(Exception,
+                                 'Datalab VM mlccvm-testuser not found in '
+                                 'project my-sample-project-123'):
+      self._run([
+          'python', self.GCLOUD_PY, 'datalab_connect', '--no_tests',
+          '--dry_run', '--mock_gcloud_data', json.dumps(mock_response_data)])
+
+  def test_delete(self):
+    self.maxDiff = None
+
+    mock_response_data = {
+        'gcloud config get-value project': (0, 'my-sample-project-123\n'),
+        'gcloud compute instances list --project my-sample-project-123 '
+        '--limit 1 --filter name:mlccvm-testuser --format value(zone)': (
+            0, 'testzone')}
+
+    out, err = self._run([
+        'python', self.GCLOUD_PY, 'datalab_delete', '--no_tests', '--dry_run',
+        '--mock_gcloud_data', json.dumps(mock_response_data)])
+
+    self.assertFalse(out)
+    self.assert_file_equals(err, self.EXPECTED_DATALAB_DELETE)
 
 
+Command.register(DatalabCreate)
+Command.register(DatalabConnect)
+Command.register(DatalabDelete)
 Command.register(ProjectsCreate)
 Command.register(ProjectsDelete)
+Command.register(RunTests)
 
-Command.TESTS.append(ArgsTests)
+
 Command.TESTS.append(CoreTests)
+Command.TESTS.append(DatalabCommandTests)
+Command.TESTS.append(ProjectCommandTests)
 Command.TESTS.append(RetryTests)
 
 

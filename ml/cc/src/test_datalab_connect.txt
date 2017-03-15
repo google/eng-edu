@@ -1,0 +1,5 @@
+'gcloud', 'config', 'get-value', 'project'
+'gcloud', 'compute', 'instances', 'list', '--project', 'my-sample-project-123', '--limit', '1', '--filter', 'name:mlccvm-testuser', '--format', 'value(zone)'
+'sudo', 'gcloud', '--quiet', 'components', 'update'
+'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha', 'datalab'
+'datalab', 'connect', 'mlccvm-testuser', '--project', 'my-sample-project-123', '--zone', 'testzone', '--no-launch-browser'

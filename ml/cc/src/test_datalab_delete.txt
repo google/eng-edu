@@ -1,0 +1,4 @@
+'gcloud', 'config', 'get-value', 'project'
+'gcloud', 'compute', 'instances', 'list', '--project', 'my-sample-project-123', '--limit', '1', '--filter', 'name:mlccvm-testuser', '--format', 'value(zone)'
+'gcloud', '--quiet', 'compute', 'instances', 'delete', 'mlccvm-testuser', '--project', 'my-sample-project-123', '--zone', 'testzone', '--delete-disks', 'all'
+'sudo', 'gcloud', '--quiet', 'components', 'remove', 'datalab'
