@@ -1,0 +1,2 @@
+'jupyter', 'nbconvert', '--to', 'notebook', '--execute', '--output', u'foo.new.ipynb', '--ExecutePreprocessor.timeout=-1', u'foo'
+'jupyter', 'nbconvert', '--to', 'notebook', '--execute', '--output', u'bar.new.ipynb', '--ExecutePreprocessor.timeout=-1', u'bar'
