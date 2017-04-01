@@ -1141,7 +1141,7 @@ class BundleTest(Command):
       assert os.path.isfile(cls.STD_ERR)
 
       results_fn = 'bundle-test-%s.json' % int(time.time())
-      remote_log_fn = 'remote_log-%s-%s.json' % (docker_host, int(time.time()))
+      remote_log_fn = 'remote-log-%s-%s.txt' % (docker_host, int(time.time()))
 
       with open(cls.STD_ERR, 'r') as err:
         LOG.info('Writing host %s log into file ./%s',
