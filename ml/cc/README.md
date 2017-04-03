@@ -1,6 +1,41 @@
 # Google Datalab for Machine Learning Education
 
 
+## Running Datalab Locally
+
+### With Docker
+
+Follow these steps to set up a local Datalab environment on Mac, Windows, or
+Linux using Docker:
+
+**NOTE: If you are using a Chromebook, see [Running Datalab on Google
+Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
+
+1.  [Install Docker](https://www.docker.com/products/docker) version 1.12.0 or
+    later on your computer, follow the appropriate instructions and download
+    links for your operating system.
+
+2.  Open your terminal, and run the following command to launch the datalab
+    Docker container:
+
+    ```
+    docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" \
+        gcr.io/cloud-datalab/datalab:local
+    ```
+
+3.  Load https://localhost:8081/ in your web browser.
+
+4.  You should now have a local Datalab instance running in your browser. Click
+    the Home icon to navigate to your home directory:
+
+    ![Datalab home button](img/datalab_navigation.png)
+
+5.  Navigate to the folder with your exercises. Click on an .ipynb exercise to
+    run it.
+
+
+## Running Datalab on Google Cloud
+
 ### Setting Up For Individual Self-Study Use
 
 Here is how to set up your own Datalab VM running on Google Cloud:
@@ -14,8 +49,8 @@ Here is how to set up your own Datalab VM running on Google Cloud:
 
   ![Start Cloud Shell](img/cloud_shell.png)
 
-3. Create a new Datalab VM. From the Cloud Shell console, run the following
-  commands:
+3. Create a new Datalab VM in the current Google Cloud Project. From the Cloud
+  Shell console, run the following commands:
 
         git clone https://github.com/google/eng-edu.git
         ./eng-edu/ml/cc/bin/datalab_create.sh
@@ -42,10 +77,10 @@ Here is how to set up your own Datalab VM running on Google Cloud:
 6. Click on the Notebook button to open a new notebook. Setup is now complete.
   You can start writing and executing code.
 
-7. You may choose to permanently delete your Datalab VM after use. There is
-  **no undo** for this operation. The Datalab VM, the interactive notebooks and
-  all data will be permanently deleted. If you wish to proceed, from the Cloud
-  Shell console, run the following command:
+7. You may choose to permanently delete your Datalab VM in the current Google
+  Cloud Project after use. There is **no undo** for this operation. The Datalab
+  VM, the interactive notebooks and all data will be permanently deleted. If
+  you wish to proceed, from the Cloud Shell console, run the following command:
 
         ./eng-edu/ml/cc/bin/datalab_delete.sh
 
@@ -167,28 +202,83 @@ your students:
 6. Click on the Notebook button to open a new notebook. Setup is now complete.
   You can start writing and executing code.
 
+
+### Setting Up For Notebook Development and Testing
+
+Here is how to set up your own Datalab VM running on Google Cloud and then
+develop and test interactive Jupyter notebooks:
+
+1. Select existing or create new Google Cloud Project using your favorite
+  browser. You must be in the OWNER role to continue.
+
+2. To continue, you can use either Google Cloud Platform Cloud Shell or any
+  computer with an Internet connection and the most recent Google Cloud SDK
+  [installed] (https://cloud.google.com/sdk/downloads) (gcloud, gsutils).
+  To Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of
+  the console window. Click on "Start cloud shell" in the dialog box that
+  opens the first time.
+
+  ![Start Cloud Shell](img/cloud_shell.png)
+
+3. Download required shell scripts. From the Cloud Shell console, run the
+  following command:
+
+        git clone https://github.com/google/eng-edu.git
+
+  To automate bulk deployment and testing of notebooks with Google Cloud
+  projects and Datalab VMs a specialized command-line utility will be used. It
+  can execute numerous functions and has many options that control its
+  behaviour. We guide you below through the exact options to use. If you want
+  to see all supported commands and their options, run one of the following
+  command from the Cloud Shell console:
+
+        python ./eng-edu/ml/cc/src/manage.py -h
+        python ./eng-edu/ml/cc/src/manage.py datalab_create -h
+        python ./eng-edu/ml/cc/src/manage.py datalab_delete -h
+
+4. Prepare a set of Jupyter notebooks using your local development environment.
+  Package the notebooks into a content bundle: a `content_bundle.tar.gz` file.
+
+5. Create a new Datalab VM in the current Google Cloud Project, deploy the
+  content bundle and test all notebooks it contains. From the Cloud Shell
+  console, run the following commands:
+
+        python ./eng-edu/ml/cc/src/manage.py datalab_create --content_bundle content_bundle.tar.gz --validate_content_bundle
+
+6. Once the command completes, review the log messages printed to the console.
+  The log will show the number of executed, passed and failed notebooks. It will
+  also show the exact file names containing execution log
+  (`remote-log-mlccvm-<HOST_NAME>-#######.txt`) and the content of
+  executed notebooks (`bundle-test--#######.json`).
+
+7. The content bundle can be placed onto Google Cloud storage, and used
+  directly from there, for example:
+
+        python ./eng-edu/ml/cc/src/manage.py datalab_create --content_bundle gs://my_bucket/content_bundle.tar.gz --validate_content_bundle
+
+  If you have a large number of notebooks and testing takes a while, you can
+  add more virtual CPUs to a Datalab VM to reduce the execution time.
+
+  You can execute this command multiple times. If Datalab VM already exists, it
+  will not be reprovisioned (unless `--provision_vm` is specified), but the
+  content bundle will be redeployed and retested.
+
+8. You may connect to the Datalab VM and execute notebooks in the deployed
+  content bundle manually. This is only possible from the Cloud Shell and will
+  not work from you local development workstation. From the Cloud Shell
+  console, run the following commands:
+
+        python ./eng-edu/ml/cc/src/manage.py datalab_connect
+
+9. You may choose to permanently delete your Datalab VM in the current Google
+  Cloud Project after use. There is **no undo** for this operation. The Datalab
+  VM, the interactive notebooks and all data will be permanently deleted. If
+  you wish to proceed, from the Cloud Shell console, run the following command:
+
+        python ./eng-edu/ml/cc/src/manage.py datalab_delete
+
+
 ### Troubleshooting
-
-* **Symptom**: Waiting for Datalab VM to become accessible via "Web preview"
-  never completes. The Cloud Shell console hangs after these messages:
-
-        Connecting to mlccvm-{xxxxxxx}
-        Ensuring that mlccvm-{xxxxxxx} can be connected to via SSH
-
-  **Resolution**: The easiest resolution is to re-image your Datalab VM by
-  first deleting and then re-creating it. There is **no undo** for this
-  operation. The Datalab VM, the interactive notebooks and all data will be
-  permanently deleted. If you wish to proceed, from the Cloud Shell console,
-  run the following commands:
-
-        ./eng-edu/ml/cc/bin/datalab_delete.sh
-        ./eng-edu/ml/cc/bin/datalab_create.sh
-
-  Make sure both commands complete with success. Now you are ready to connect
-  to a re-imaged Datalab VM. From the Cloud Shell console, run the following
-  command:
-
-        ./eng-edu/ml/cc/bin/datalab_connect.sh
 
 * **Symptom**: Everything was working fine, but then the connection to Cloud
   Shell was lost because I either closed my browser window or Cloud Shell has
