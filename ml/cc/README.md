@@ -15,7 +15,11 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
     later on your computer, follow the appropriate instructions and download
     links for your operating system.
 
-2.  Open your terminal, and run the following command to launch the datalab
+2.  Download the [.zip of the latest release of the
+    exercises](https://storage.cloud.google.com/ml_universities/ml-universities-notebooks-20170410.tar.gz),
+    and unzip to the location of your choice.
+
+3.  Open your terminal, and run the following command to launch the datalab
     Docker container:
 
     ```
@@ -23,16 +27,15 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
         gcr.io/cloud-datalab/datalab:local
     ```
 
-3.  Load https://localhost:8081/ in your web browser.
+4.  Load https://localhost:8081/ in your web browser.
 
-4.  You should now have a local Datalab instance running in your browser. Click
+5.  You should now have a local Datalab instance running in your browser. Click
     the Home icon to navigate to your home directory:
 
     ![Datalab home button](img/datalab_navigation.png)
 
-5.  Navigate to the folder with your exercises. Click on an .ipynb exercise to
-    run it.
-
+6.  Navigate to the folder with your exercises (the location where you unzipped
+    the files in Step #2). Click on an .ipynb exercise to run it.
 
 ## Running Datalab on Google Cloud
 
