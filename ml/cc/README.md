@@ -16,7 +16,7 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
     links for your operating system.
 
 2.  Download the [.zip of the latest release of the
-    exercises](https://storage.cloud.google.com/ml_universities/ml-universities-notebooks-20170410.tar.gz),
+    exercises](https://storage.googleapis.com/ml_universities/ml-universities-notebooks-20170410.tar.gz),
     and unzip to the location of your choice.
 
 3.  Open your terminal, and run the following command to launch the datalab
