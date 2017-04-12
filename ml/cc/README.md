@@ -27,7 +27,7 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
         gcr.io/cloud-datalab/datalab:local-20170224
     ```
 
-4.  Load https://localhost:8081/ in your web browser.
+4.  Load http://localhost:8081/ in your web browser.
 
 5.  You should now have a local Datalab instance running in your browser. Click
     the Home icon to navigate to your home directory:
