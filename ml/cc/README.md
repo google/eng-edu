@@ -24,7 +24,7 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
 
     ```
     docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" \
-        gcr.io/cloud-datalab/datalab:local
+        gcr.io/cloud-datalab/datalab:local-20170224
     ```
 
 4.  Load https://localhost:8081/ in your web browser.
