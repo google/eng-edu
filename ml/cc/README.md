@@ -11,20 +11,27 @@ Linux using Docker:
 **NOTE: If you are using a Chromebook, see [Running Datalab on Google
 Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
 
-1.  [Install Docker](https://www.docker.com/products/docker) version 1.12.0 or
-    later on your computer, follow the appropriate instructions and download
-    links for your operating system.
+1.  [Install Docker](https://www.docker.com/products/docker) on your computer;
+    follow the appropriate instructions and download links for your operating
+    system.
 
 2.  Download the [.zip of the latest release of the
     exercises](https://storage.googleapis.com/ml_universities/ml-universities-notebooks-20170410.tar.gz),
     and unzip to the location of your choice.
 
 3.  Open your terminal, and run the following command to launch the datalab
-    Docker container:
+    Docker container.
+
+    **For Mac/Linux**:
 
     ```
-    docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" \
-        gcr.io/cloud-datalab/datalab:local-20170224
+    docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" gcr.io/cloud-datalab/datalab:local-20170224
+    ```
+
+    **For Windows**:
+
+    ```
+    docker run -it -p "127.0.0.1:8081:8080" -v "\path\to\exercise_directory:/content" gcr.io/cloud-datalab/datalab:local-20170224
     ```
 
 4.  Load http://localhost:8081/ in your web browser.
@@ -36,6 +43,9 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
 
 6.  Navigate to the folder with your exercises (the location where you unzipped
     the files in Step #2). Click on an .ipynb exercise to run it.
+
+    Alternatively, you can click the Upload button in the Docker web interface
+    and upload the .ipynb files via the filesystem.
 
 ## Running Datalab on Google Cloud
 
