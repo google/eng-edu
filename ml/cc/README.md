@@ -25,7 +25,8 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
     **For Mac/Linux**:
 
     ```
-    docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" gcr.io/cloud-datalab/datalab:local-20170224
+    docker run -it -p "127.0.0.1:8081:8080" -v "${HOME}:/content" \
+        gcr.io/cloud-datalab/datalab:local-20170224
     ```
 
     **For Windows**:
@@ -33,6 +34,10 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
     ```
     docker run -it -p "127.0.0.1:8081:8080" -v "\path\to\exercise_directory:/content" gcr.io/cloud-datalab/datalab:local-20170224
     ```
+
+    NOTE: If you haven't previously run the above command, Docker will output
+    the message "Unable to find image locally," and then will proceed to
+    download the image.
 
 4.  Load http://localhost:8081/ in your web browser.
 
@@ -53,57 +58,67 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
 
 Here is how to set up your own Datalab VM running on Google Cloud:
 
-1. Select existing or create new Google Cloud Project using your favorite
-  browser. You must be in the OWNER role to continue.
+1.  Select existing or create new Google Cloud Project using your favorite
+    browser. You must be in the OWNER role to continue.
 
-2. Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
-  console window. Click on "Start cloud shell" in the dialog box that opens the
-  first time.
+2.  Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
+    console window. Click on "Start cloud shell" in the dialog box that opens
+    the first time.
 
-  ![Start Cloud Shell](img/cloud_shell.png)
+    ![Start Cloud Shell](img/cloud_shell.png)
 
-3. Create a new Datalab VM in the current Google Cloud Project. From the Cloud
-  Shell console, run the following commands:
+3.  Create a new Datalab VM in the current Google Cloud Project. From the Cloud
+    Shell console, run the following commands:
 
         git clone https://github.com/google/eng-edu.git
         ./eng-edu/ml/cc/bin/datalab_create.sh
 
-4. Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
-  run the following command:
+4.  Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
+    run the following command:
 
         ./eng-edu/ml/cc/bin/datalab_connect.sh
 
-  If you are asked to set up an SSH key or a passphrase, press enter to stick
-  with the defaults.
+    If you are asked to set up an SSH key or a passphrase, press enter to stick
+    with the defaults.
 
-5. Wait for the Cloud Shell console message that Datalab VM is ready for use.
+5.  Wait for the Cloud Shell console message that Datalab VM is ready for use.
 
-  Click on the "Web preview" button of the Cloud Shell window menu (the up
-  arrow icon at the top-left), then under "Change port" select port 8081 to
-  open a webpage containing the Datalab application.
+    Click on the "Web preview" button of the Cloud Shell window menu (the up
+    arrow icon at the top-left), then under "Change port" select port 8081 to
+    open a webpage containing the Datalab application.
 
-  ![Start Cloud Shell](img/web_preview.png)
+    ![Start Cloud Shell](img/web_preview.png)
 
-  New browser tab with the Datalab application should open. Click "Accept" to
-  accept the terms of service and proceed.
+    New browser tab with the Datalab application should open. Click "Accept" to
+    accept the terms of service and proceed.
 
-6. Click on the Notebook button to open a new notebook. Setup is now complete.
-  You can start writing and executing code.
+6.  Click on the Notebook button to open a new notebook. In the notebook, in a
+    code cell, run the following commands to download and extract the exercises:
 
-7. You may choose to permanently delete your Datalab VM in the current Google
-  Cloud Project after use. There is **no undo** for this operation. The Datalab
-  VM, the interactive notebooks and all data will be permanently deleted. If
-  you wish to proceed, from the Cloud Shell console, run the following command:
+        !wget https://storage.googleapis.com/ml_universities/ml-universities-notebooks-20170410.tar.gz \
+            -O /content/datalab/notebooks/ml-universities-notebooks-20170410.tar.gz
+        !tar -zxvf /content/datalab/notebooks/ml-universities-notebooks-20170410.tar.gz \
+            -C /content/datalab/notebooks/
+
+    Then, click on the Google Cloud Datalab logo in the top bar to go back to
+    the Datalab homepage. In the Datalab file UI, click on the *datalab* folder
+    link, then *notebooks*, and then *ml-exercises*. Then click any of the
+    exercise .ipynb links to run a notebook.
+
+7.  You may choose to permanently delete your Datalab VM in the current Google
+    Cloud Project after use. There is **no undo** for this operation. The
+    Datalab VM, the interactive notebooks and all data will be permanently
+    deleted. If you wish to proceed, from the Cloud Shell console, run the
+    following command:
 
         ./eng-edu/ml/cc/bin/datalab_delete.sh
-
 
 ### Setting Up For A Class Use: One Teacher, Multiple Students
 
 Here is how to set up several Datalab VMs running on Google Cloud for access by
 your students:
 
-#### As A Teacher
+#### As a Teacher
 
 1. Select existing or create new Google Cloud Project using your favorite
   browser. You must be in the OWNER role to continue. All students would need
@@ -179,42 +194,54 @@ your students:
 
         python ./eng-edu/ml/cc/src/manage.py projects_delete --prefix project-prefix --students "student1.example@gmail.com student2.example@gmail.com" --dry_run
 
-#### As A Student
+#### As a Student
 
-1. Wait for a Teacher to inform your that your Datalab VM project is ready.
+1.  Wait for a Teacher to inform your that your Datalab VM project is ready.
 
-2. Using your favorite browser, navigate to a Google Cloud Project URL provided
-  to you by a teacher.
+2.  Using your favorite browser, navigate to a Google Cloud Project URL provided
+    to you by a teacher.
 
-3. Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
-  console window. Click on "Start cloud shell" in the dialog box that opens the
-  first time.
+3.  Start Cloud Shell. Click "Activate Google Cloud Shell" at the top of the
+    console window. Click on "Start cloud shell" in the dialog box that opens
+    the first time.
 
-  ![Start Cloud Shell](img/cloud_shell.png)
+    ![Start Cloud Shell](img/cloud_shell.png)
 
-4. Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
-  run the following command:
+4.  Connect Cloud Shell to a running Datalab VM. From the Cloud Shell console,
+    run the following command:
 
         git clone https://github.com/google/eng-edu.git
         ./eng-edu/ml/cc/bin/datalab_connect.sh
 
-  If you are asked to set up an SSH key or a passphrase, press enter to stick
-  with the defaults.
+    If you are asked to set up an SSH key or a passphrase, press enter to stick
+    with the defaults.
 
-5. Wait for the Cloud Shell console message that Datalab is ready for use.
+5.  Wait for the Cloud Shell console message that Datalab is ready for use.
 
-  Click on the "Web preview" button of the Cloud Shell window menu (the up
-  arrow icon at the top-left), then under "Change port" select port 8081 to
-  open a webpage containing the Datalab application.
+    Click on the "Web preview" button of the Cloud Shell window menu (the up
+    arrow icon at the top-left), then under "Change port" select port 8081 to
+    open a webpage containing the Datalab application.
 
-  ![Start Cloud Shell](img/web_preview.png)
+    ![Start Cloud Shell](img/web_preview.png)
 
-  New browser tab with the Datalab application should open. Click "Accept" to
-  accept the terms of service and proceed.
+    New browser tab with the Datalab application should open. Click "Accept" to
+    accept the terms of service and proceed.
 
-6. Click on the Notebook button to open a new notebook. Setup is now complete.
-  You can start writing and executing code.
+6.  Click on the Notebook button to open a new notebook. In the notebook, in a
+    code cell, run the following commands to download and extract the exercises:
 
+        !wget https://storage.googleapis.com/ml_universities/ml-universities-notebooks-20170410.tar.gz \
+            -O /content/datalab/notebooks/ml-universities-notebooks-20170410.tar.gz
+        !tar -zxvf /content/datalab/notebooks/ml-universities-notebooks-20170410.tar.gz \
+            -C /content/datalab/notebooks/
+
+    Then, click on the Google Cloud Datalab logo in the top bar to go back to
+    the Datalab homepage. In the Datalab file UI, click on the *datalab* folder
+    link, then *notebooks*, and then *ml-exercises*. Then click any of the
+    exercise .ipynb links to run a notebook.
+
+7.  Click on the Notebook button to open a new notebook. Setup is now complete.
+    You can start writing and executing code.
 
 ### Setting Up For Notebook Development and Testing
 
