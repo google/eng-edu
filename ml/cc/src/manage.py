@@ -629,7 +629,9 @@ class ProjectsCreate(Command):
 
   SUPPORTED_DATALAB_IMAGES = {
       'TF_RC0': ('TensorFlow 0.11, RC0',
-                 'gcr.io/cloud-datalab/datalab:local-20170127')
+                 'gcr.io/cloud-datalab/datalab:local-20170127'),
+      'TF_1': ('TensorFlow 1.0.0',
+               'gcr.io/cloud-datalab/datalab:local-20170224')
   }
 
   def __init__(self):
