@@ -32,15 +32,25 @@ Cloud](#running-datalab-on-google-cloud) instead for Cloud setup instructions.**
     **For Windows**:
 
     ```
-    docker run -it -p "127.0.0.1:8081:8080" -v "\path\to\exercise_directory:/content" gcr.io/cloud-datalab/datalab:local-20170224
+    docker run -it -p "127.0.0.1:8081:8080" -v "/path/to/exercise_directory:/content" gcr.io/cloud-datalab/datalab:local-20170224
     ```
 
     NOTE: If you haven't previously run the above command, Docker will output
     the message "Unable to find image locally," and then will proceed to
     download the image.
 
+    **Example For Windows**:
+    
+    Assume that the exercise directory is "E:/ml-universities-notebooks"
+    ```
+    docker run -it -p "127.0.0.1:8081:8080" -v "/e/ml-universities-notebooks:/content" gcr.io/cloud-datalab/datalab:local-20170224 
+    ```
 4.  Load http://localhost:8081/ in your web browser.
 
+    NOTE: If the virtual machine is not configured properly, the host machine can not access guest's http://127.0.0.1:8081/. That means you can not load http://localhost:8081/ or http://127.0.0.1:8081/ in your web browser. To avoid this issue, use the IP that the default virtual machine got instead of "127.0.0.1". You can get this IP after the docker is started(example: "docker is configured to use the default machine with IP 192.168.99.100"). Run the following command and then load http://192.168.99.100:8081/
+    ```
+    docker run -it -p "192.168.99.100:8081:8080" -v "/e/ml-universities-notebooks:/content" gcr.io/cloud-datalab/datalab:local-20170224 
+    ```
 5.  You should now have a local Datalab instance running in your browser. Click
     the Home icon to navigate to your home directory:
 
