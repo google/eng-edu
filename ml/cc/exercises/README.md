@@ -53,6 +53,15 @@ installation instructions):
     that can accurately recognize the handwritten digits in the [MNIST data
     set](http://yann.lecun.com/exdb/mnist/).
 
+*   **Intro to Sparse Data and Embeddings:** An introduction to embeddings.
+    Build a sentiment-analysis model for movie-review text using an embedding
+    that projects data into two dimensions.
+
+*   **Intro to Fairness:** An introduction to evaluating models for fairness.
+    Explore the Adult Census Income data set to proactively identify potential
+    sources of bias, and then, post-training, evaluate model performance by
+    subgroup.
+
 ## Principal Contributors
 
 The following Google employees contributed to the development of these
@@ -60,6 +69,7 @@ exercises:
 
 *   Eric Breck, Software Engineer
 *   Mig Gerard, Software Engineer
+*   Sally Goldman, Research Scientist
 *   Mustafa Ispir, Software Engineer
 *   Vihan Jain, Software Engineer
 *   Sanders Kleinfeld, Technical Writer
@@ -68,6 +78,7 @@ exercises:
 *   Barry Rosenberg, Technical Writer
 *   D. Sculley, Software Engineer
 *   Shawn Simister, Developer Programs Engineer
+*   Andrew Zaldivar, Developer Advocate
 
 ## Licensing
 
