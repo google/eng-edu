@@ -1,4 +1,0 @@
-'sudo', 'gcloud', '--quiet', 'components', 'update'
-'sudo', 'gcloud', '--quiet', 'components', 'install', 'alpha', 'datalab'
-'gcloud', 'projects', 'describe', 'my-prefix--student1examplecom', '--format', 'value(lifecycleState)'
-'gcloud', 'projects', 'describe', 'my-prefix--student2examplecom', '--format', 'value(lifecycleState)'
