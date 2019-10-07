@@ -11,7 +11,7 @@ Before you start working on a larger contribution, we recommend to get in touch 
 All submissions, including submissions by project members, require review. We use GitHub pull requests for this purpose.
 
 ### Organization
-During our review and triage of incoming pull requests, we'll advise whether to include your contribution into the Colab product, or maintain it as an installable, but separate component or library.
+During our review and triage of incoming pull requests, we'll advise whether to include your contribution into the Datalab product, or maintain it as an installable, but separate component or library.
 
 ### The small print
 Contributions made by corporations are covered by a different agreement than the one above, the Software Grant and Corporate Contributor License Agreement.
