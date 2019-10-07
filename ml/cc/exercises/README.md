@@ -1,6 +1,5 @@
 Solidify your knowledge of ML fundamentals and get up to speed with TensorFlow's
-new high-level Estimator API with these
-[Datalab](https://cloud.google.com/datalab/) programming exercises (click
+new high-level Estimator API with these programming exercises (click
 [here](https://github.com/google/eng-edu/blob/master/ml/cc/README.md) for
 installation instructions):
 
