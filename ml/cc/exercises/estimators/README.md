@@ -1,3 +1,7 @@
+NOTE: These exercises are deprecated, and are no longer being maintained.
+We recommend you use the [latest exercises using tf.keras](https://github.com/google/eng-edu/tree/master/ml/cc/exercises)
+instead.
+
 Solidify your knowledge of ML fundamentals and get up to speed with TensorFlow's
 new high-level Estimator API with these programming exercises (click
 [here](https://github.com/google/eng-edu/blob/master/ml/cc/README.md) for
