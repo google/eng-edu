@@ -72,7 +72,7 @@ def plot_frequency_distribution_of_ngrams(sample_texts,
     """
     # Create args required for vectorizing.
     kwargs = {
-            'ngram_range': (1, 1),
+            'ngram_range': ngram_range,
             'dtype': 'int32',
             'strip_accents': 'unicode',
             'decode_error': 'replace',
